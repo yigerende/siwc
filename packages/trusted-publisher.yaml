@@ -1,0 +1,4 @@
+plugins:
+  allow_unsigned: false
+  trusted_publishers:
+    local-siwc-v1: "PA3v9HuhQL5MPmEQL0c7RSp5bNRkYVOlK2NDYhIIhs8="

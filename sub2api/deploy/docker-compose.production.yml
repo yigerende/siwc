@@ -1,0 +1,32 @@
+# Use with docker-compose.yml and the private .env in this directory.
+# Only this Compose project is managed by these files.
+services:
+  sub2api-siwc:
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 512
+    environment:
+      - GOMAXPROCS=2
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+  postgres:
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+  redis:
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"

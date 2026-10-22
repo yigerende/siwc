@@ -1,0 +1,11 @@
+SIWC 传输插件 0.2.5
+
+Windows x64：siwc-transport-0.2.5-windows-amd64.s2plugin
+Linux x86_64 / amd64：siwc-transport-0.2.5-linux-amd64.s2plugin
+Linux 包不适用于 ARM64 服务器。
+
+两个包均使用 local-siwc-v1 发布者签名。
+安装前将 trusted-publisher.yaml 中的配置合并到服务器 config.yaml，保留其他配置与已有可信发布者，重启 sub2api 后在管理后台上传对应平台的插件包并启用。
+
+配套使用本次的 SIWC 改造版 sub2api 0.2.17。
+此目录仅包含安装包、公钥配置和说明，不包含签名私钥。

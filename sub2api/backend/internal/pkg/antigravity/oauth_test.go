@@ -774,12 +774,12 @@ func TestBuildAuthorizationURL_特殊字符编码(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConstants_值正确(t *testing.T) {
+	oldID, oldSecret := ClientID, defaultClientSecret
+	t.Cleanup(func() { ClientID, defaultClientSecret = oldID, oldSecret })
 	t.Setenv(AntigravityOAuthClientIDEnv, "test-antigravity-client-id")
 	ClientID = os.Getenv(AntigravityOAuthClientIDEnv)
-	t.Cleanup(func() { ClientID = "configure-antigravity-client-id" })
 	t.Setenv(AntigravityOAuthClientSecretEnv, "test-antigravity-client-secret")
 	defaultClientSecret = os.Getenv(AntigravityOAuthClientSecretEnv)
-	t.Cleanup(func() { defaultClientSecret = "" })
 	if AuthorizeURL != "https://accounts.google.com/o/oauth2/v2/auth" {
 		t.Errorf("AuthorizeURL 不匹配: got %s", AuthorizeURL)
 	}
