@@ -54,7 +54,7 @@ COPY --from=backend /out/sub2api /app/sub2api
 COPY --chown=sub2api:sub2api backend/resources /app/resources
 RUN mkdir -p /app/data && chown -R sub2api:sub2api /app
 COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+RUN chmod 755 /app/docker-entrypoint.sh
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
