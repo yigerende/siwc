@@ -1,0 +1,1387 @@
+# Sign in with ChatGPT — full documentation
+
+> Single-file Markdown export of Sign in with ChatGPT docs.
+
+Curated index: https://developers.openai.com/siwc/llms.txt
+
+# In your ChatGPT plugin
+
+Sign in with ChatGPT is currently available to selected commercial partners
+  through a limited trial. To join the waitlist, contact your OpenAI
+  representative.
+
+Add Sign in with ChatGPT to let users sign in to your connector with their
+ChatGPT account. They start the flow by selecting **Continue with ChatGPT** in
+ChatGPT's plugin modal.
+
+When a user starts this flow, ChatGPT begins your connector's OAuth flow. Your
+application validates the OpenAI ID token, then completes connector
+authorization.
+
+
+
+> Illustration: A ChatGPT plugin page with a centered Connect Acme modal. ChatGPT and partner icons appear above the description, Plan projects and move work forward. The modal offers Sign in with Acme and a primary Continue with ChatGPT button, while the plugin page remains visible behind it.
+
+
+
+## Understand the two flows
+
+This integration contains two independent OAuth transactions. The outer
+transaction authorizes your connector for ChatGPT. The inner transaction signs the user
+in with ChatGPT and validates the OpenAI ID token. Keep their state, PKCE values, callbacks,
+authorization codes, and credentials separate.
+
+| Transaction                | OAuth client     | Authorization server | Result                                                                |
+| -------------------------- | ---------------- | -------------------- | --------------------------------------------------------------------- |
+| Outer: Connect your plugin | ChatGPT          | Your application     | Your connector authorization code, returned to ChatGPT.               |
+| Inner: Sign in the user    | Your application | OpenAI               | An OpenAI authorization code, exchanged and verified by your backend. |
+
+The inner transaction uses the [website sign-in flow](https://developers.openai.com/siwc/website). After
+verifying the OpenAI ID token, your application identifies or creates a local
+account and resumes the saved outer transaction.
+
+## 1. Accept ChatGPT's authorization request
+
+ChatGPT initiates a connector authorization request to your endpoint:
+
+```text
+GET /oauth/authorize?
+  response_type=code
+  &client_id=CHATGPT_CONNECTOR_CLIENT_ID
+  &redirect_uri=REGISTERED_CHATGPT_CALLBACK
+  &scope=REQUESTED_CONNECTOR_SCOPES
+  &state=CHATGPT_GENERATED_STATE
+  &code_challenge=CHATGPT_PKCE_CHALLENGE
+  &code_challenge_method=S256
+  &resource=CONNECTOR_RESOURCE
+  &login_hint=USER_EMAIL_HINT
+  &target_flow=chatgpt_siwc
+```
+
+Validate the registered ChatGPT connector client, exact redirect URI, supported
+scopes, and outer PKCE challenge. Validate `resource` when your connector
+implements resource indicators.
+
+`target_flow=chatgpt_siwc` indicates a Sign in with ChatGPT-enabled connector
+experience. Use `login_hint`, which contains the user's email, to suggest an
+account or route to enterprise SSO.
+
+When the hint matches an existing authenticated session and enterprise sign-in
+requirements are satisfied, continue to connector consent without showing another
+account selector. If the accounts differ, let the user choose. The hint does not verify the user's identity.
+
+## 2. Save the outer connector transaction
+
+Persist the validated connector request before starting inner sign-in. The
+example below uses an application-owned registry of the connector client,
+callback, scopes, and resource.
+
+```javascript
+export function saveConnectorTransaction(browserSessionId, requestUrl) {
+  const params = requestUrl.searchParams;
+  const scope = (params.get("scope") ?? "").split(" ").filter(Boolean);
+  const codeChallenge = params.get("code_challenge") ?? "";
+  if (
+    params.get("response_type") !== "code" ||
+    params.get("client_id") !== registeredConnector.clientId ||
+    params.get("redirect_uri") !== registeredConnector.redirectUri ||
+    params.get("code_challenge_method") !== "S256" ||
+    !/^[A-Za-z0-9_-]{43}$/.test(codeChallenge) ||
+    !params.get("state") ||
+    scope.some((value) => !registeredConnector.scopes.has(value)) ||
+    params.get("resource") !== registeredConnector.resource
+  ) {
+    throw new Error("The connector authorization request is invalid.");
+  }
+
+  const transaction = {
+    id: randomValue(),
+    browserSessionId,
+    clientId: registeredConnector.clientId,
+    redirectUri: registeredConnector.redirectUri,
+    state: params.get("state"),
+    codeChallenge,
+    codeChallengeMethod: "S256",
+    scope: scope.join(" "),
+    resource: registeredConnector.resource,
+    loginHint: params.get("login_hint"),
+    targetFlow: params.get("target_flow"),
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  };
+  transactions.set(transaction.id, transaction);
+  return transaction;
+}
+```
+
+
+Bind the transaction to a server-generated browser session, set a short lifetime,
+and protect the session identifier with an `HttpOnly`, `Secure` cookie. Use your
+production session store instead of the example's in-memory map.
+
+## 3. Choose the account experience
+
+Use `target_flow`, the existing first-party session, and `login_hint` to select
+the next experience. Check enterprise policy before continuing authorization.
+
+```javascript
+export function chooseAccountExperience(currentUser, connector, enterpriseSso) {
+  const loginHint = connector.loginHint;
+  if (enterpriseSso) {
+    return { action: "enterprise-sign-in", returnTo: connector.id };
+  }
+  if (currentUser && (!loginHint || currentUser.email === loginHint)) {
+    return { action: "connector-consent", userId: currentUser.id };
+  }
+  if (currentUser && loginHint) {
+    return { action: "account-selector", suggestedEmail: loginHint };
+  }
+  if (connector.targetFlow !== "chatgpt_siwc") {
+    return { action: "application-sign-in", returnTo: connector.id };
+  }
+  return { action: "sign-in-with-chatgpt", returnTo: connector.id };
+}
+```
+
+
+Use the returned action to show the account selector, start your existing
+application or enterprise sign-in, show connector consent, or start Sign in with ChatGPT.
+Label the sign-in action **Continue with ChatGPT**.
+
+- If the active account and hint differ, let the person choose the account.
+- Honor enterprise-managed domains, mandatory SSO, organization access, and account-provisioning rules.
+- Avoid exposing whether an email address or enterprise domain has an account through publicly distinguishable errors.
+- If you offer manual linking, explain how the person can sign in and connect the existing account.
+
+## 4. Reuse website sign-in
+
+Start the complete [website sign-in flow](https://developers.openai.com/siwc/website) with its own values:
+
+- A new OpenAI sign-in `state`.
+- A new PKCE verifier and S256 challenge.
+- A new OpenAI nonce.
+- Your registered OpenAI client ID and callback URI.
+- The identity scopes `openid profile email`.
+
+A client's registered scopes define the maximum that it may request; they aren't
+granted automatically. Requesting `openid profile email` is an identity-only
+authorization.
+
+Verify the inner state, exchange the OpenAI code on your backend, and verify the
+OpenAI ID token before identifying or linking the local account. Resume the
+browser's saved connector transaction after establishing the local session.
+
+## 5. Return your connector authorization code
+
+After authenticating the user and completing your connector's consent and access
+checks, issue an authorization code for your connector. The code must be
+short-lived, single-use, and bound to the original connector request.
+
+```javascript
+export function completeConnectorAuthorization(
+  transactionId,
+  browserSessionId,
+  authenticatedUser,
+  consentGranted
+) {
+  const connector = transactions.get(transactionId);
+  if (
+    !connector ||
+    connector.browserSessionId !== browserSessionId ||
+    connector.expiresAt <= Date.now() ||
+    !authenticatedUser
+  ) {
+    throw new Error("The connector transaction could not be verified.");
+  }
+  transactions.delete(transactionId);
+
+  const callback = new URL(connector.redirectUri);
+  callback.searchParams.set("state", connector.state);
+  if (!consentGranted) {
+    callback.searchParams.set("error", "access_denied");
+    return callback.toString();
+  }
+
+  const connectorCode = randomValue();
+  authorizationCodes.set(connectorCode, {
+    userId: authenticatedUser.id,
+    clientId: connector.clientId,
+    redirectUri: connector.redirectUri,
+    codeChallenge: connector.codeChallenge,
+    scope: connector.scope,
+    resource: connector.resource,
+    expiresAt: Date.now() + 60 * 1000,
+  });
+  callback.searchParams.set("code", connectorCode);
+  return callback.toString();
+}
+```
+
+
+Redirect the browser to the returned callback URL. Pass `authenticatedUser` only
+from a verified application session and `consentGranted` only after your
+connector's consent and access checks. In production, consume transactions and
+codes atomically in shared storage.
+
+If the user denies access or authorization fails, return an appropriate OAuth
+error to the validated, registered connector callback with the original state.
+Don't redirect to a callback until you've validated it.
+
+## 6. Complete connector token exchange
+
+ChatGPT redeems your connector authorization code at your connector token
+endpoint. That endpoint must:
+
+1. Validate the connector client.
+2. Validate the authorization code, original connector redirect URI, and expiration.
+3. Verify the outer `code_verifier` against the stored connector `code_challenge`.
+4. Enforce the granted connector scopes and resource audience.
+5. Issue only the application-owned connector tokens required for the integration.
+6. Store and revoke connector credentials according to your existing security policy.
+
+## Handle common integration problems
+
+### The plugin opens the wrong account
+
+Compare the hint to the current session for user experience only. Offer an
+account selector instead of silently replacing a session or trusting an
+unverified email.
+
+### Enterprise SSO is required
+
+Route the person through the existing enterprise identity provider. Resume the
+saved outer request only after your application establishes a valid local
+session.
+
+### ChatGPT rejects the callback
+
+Confirm that the redirect URI exactly matches the registered ChatGPT connector
+callback. Return the original outer `state` and a connector authorization code.
+Don't send an OpenAI code or ID token to ChatGPT as the connector result.
+
+### PKCE verification fails
+
+Check which transaction the verifier belongs to. The OpenAI verifier redeems the
+inner OpenAI code; the ChatGPT verifier redeems your outer connector code.
+
+### A returning user can't reconnect
+
+Keep account-linking and reconnection paths available. If an existing account
+must be linked manually, show actionable steps instead of an unexplained
+conflict or generic error.
+
+## Enable Continue with ChatGPT
+
+After completing your implementation, contact your OpenAI representative on the
+partnerships team to enable **Continue with ChatGPT** in your ChatGPT plugin's
+modal.
+
+## Test before launch
+
+- Validate the connector's registered client, callback, scopes, and PKCE challenge.
+- Confirm `target_flow=chatgpt_siwc` selects the expected experience.
+- Test existing-account, switched-account, new-account, and enterprise SSO paths.
+- Confirm the connector token endpoint verifies its own outer PKCE challenge.
+- Keep the inner OpenAI code, ID token, and verifier out of the outer flow.
+- Check that expired or reused connector transactions and authorization codes are rejected.
+- Return denial errors only to the validated callback, with the original state.
+
+---
+
+# Quickstart
+
+Sign in with ChatGPT lets users sign in to your app with their ChatGPT account
+and, when eligible, use their ChatGPT plan for AI requests. It supports sign-in
+and optional ChatGPT plan usage:
+
+- **For users:** Sign in with an existing ChatGPT account. Eligible ChatGPT Plus
+  and Pro users can use their ChatGPT plan for AI requests in participating apps
+  and manage app usage and access in ChatGPT settings.
+- **For partner apps:** Offer a familiar sign-in option on your website or in your
+  ChatGPT plugin. Apps approved for ChatGPT plan usage can also complete eligible
+  AI requests with usage included in the user's ChatGPT plan or available credits.
+- **For open-source developers:** Let users run AI workloads in your tools with
+  their ChatGPT plan, without requiring them to provide an API key. The
+  open-source sign-in flow registers your client and issues OAuth credentials for
+  eligible Responses API requests, without a client secret or partner API key.
+
+Sign in with ChatGPT is currently available to selected commercial partners
+through a limited trial. ChatGPT plan usage is available to all open-source
+partners and selected private clients.
+
+## Choose an integration
+
+
+
+
+| Start here                                                                    | What it is                                                                                                   |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [Sign-in on your website](https://developers.openai.com/siwc/website)                                      | ChatGPT users bring their identity into your product to sign up or sign in with an account they already use. |
+| [Sign-in for your ChatGPT plugin](https://developers.openai.com/siwc/chatgpt-plugin)                       | Users sign in to your app through ChatGPT with less OAuth friction.                                          |
+| [ChatGPT plan usage in your open-source app](https://developers.openai.com/siwc/token-sharing-open-source) | Eligible ChatGPT Plus and Pro users can use their ChatGPT plan for AI requests in your product.              |
+
+
+
+
+## Make sign-in recognizable
+
+Label the action **Continue with ChatGPT**. Place it with your other sign-in
+options, give it comparable visual prominence, and use approved OpenAI branding.
+
+Returning users should find the same sign-in method on subsequent visits. If
+someone already has an account, provide a clear way to confirm and link it. When
+your product requires enterprise single sign-on, guide the person to that
+existing sign-in experience.
+
+## Understand scopes
+
+With the appropriate identity scopes, your application can receive a stable
+account identifier and a person's name, email address, and
+profile picture. Identity scopes don't grant access to ChatGPT conversations or
+OpenAI API resources.
+
+Using a ChatGPT plan requires separate Responses API scopes that the user must
+authorize. It doesn't grant access to the user's API key or conversations. Follow
+the [open-source sign-in guide](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) for its
+authorization and request contract.
+
+## Follow the sign-in flow
+
+Identity-only clients request `openid profile email` to receive an ID token for
+sign-in. Clients that use ChatGPT plans also request scopes for Responses API
+access. If the user grants those scopes, the token response includes an access
+token for eligible inference requests.
+
+1. Your application starts an OpenID Connect sign-in with PKCE.
+2. The person authenticates and consents with OpenAI.
+3. OpenAI returns an authorization code to your registered callback.
+4. Your backend exchanges the code and verifies the OpenAI ID token.
+5. Your application identifies or creates a local account and issues its own session.
+
+For a plugin, your application also returns a connector authorization code to
+ChatGPT. The connector's permissions and credentials remain separate from the
+OpenAI identity token.
+
+Your application owns account creation, enterprise sign-in policy, sessions,
+  authorization, and connector access. Sign in with ChatGPT supplies the
+  verified OpenAI identity used by those application flows.
+
+---
+
+# Request a client ID
+
+Sign in with ChatGPT is currently offered to a select group of commercial partners.
+To join the waitlist, complete the [Sign in with ChatGPT interest form](https://openai.com/form/sign-in-with-chatgpt-interest/).
+
+---
+
+# Overview
+
+## Introduction
+
+ChatGPT plan usage is an optional capability within Sign in with ChatGPT. In addition to identity scopes, your open-source app can request permission to use the user’s ChatGPT plan for eligible Responses API requests. This does not grant access to their ChatGPT conversations or other account context.
+
+_These docs explain ChatGPT plan usage for open-source and locally hosted apps. If you’re interested in offering it in a paid or remotely hosted app, complete the [interest form](https://openai.com/form/sign-in-with-chatgpt-interest/)._
+
+The OAuth flow for OSS clients registers a **user-defined agent** during Sign in with ChatGPT. Before the first sign-in, choose and persist the required `ext_agent_host_id`.
+
+## A client vs. an agent host
+
+A client is the OAuth registration a user authorizes for your tool during Sign in with ChatGPT. In this dynamic-registration flow, each issued `client_id` is bound to the authenticated user and the workspace selected during registration. Its issued `client_id` identifies that registration, its security boundaries, and its ChatGPT plan usage settings.
+
+An agent host is the environment where an instance of your tool runs, such as a laptop installation or a self-hosted VM. Your app defines what counts as one host and when its lifecycle begins and ends. Restarting the tool or signing in again does not by itself create a new host.
+
+The client represents what the user authorizes and configures; the host represents where the app runs. A single client can have multiple hosts for the same user and workspace. For example, the same user’s laptop and self-hosted VM can use one issued `client_id` for that workspace to share ChatGPT plan usage settings and limits, while each has its own host ID. Send the stable, opaque `ext_agent_host_id` so ChatGPT plan usage can be associated with its host separately from the issued `client_id`. An issued `client_id` can be reused across different agent hosts for the same user and workspace, but each host must have its own distinct host identifier.
+
+
+
+> Illustration: One ChatGPT user and workspace authorizes one issued client_id. The same client registration shares plan usage settings and limits across a laptop with host ID L and a self-hosted VM with host ID V. Each host has a distinct host ID.
+
+
+
+In this illustration, two hosts for the same user and workspace share one client configuration while having their own unique host IDs.
+
+**Host-ID:** Generate and persist a stable `ext_agent_host_id` for each host separately. Choose and persist the host ID before its first sign-in. Use an opaque value, not an email, user ID, or other user-identifying value. A host ID is not an authentication credential.
+
+When choosing a host-ID format, prefer a JWK thumbprint URI derived from the public key in a public/private key pair using [RFC 9278](https://www.rfc-editor.org/rfc/rfc9278.html). Persist the `urn:ietf:params:oauth:jwk-thumbprint:…` value and reuse it as the host's `ext_agent_host_id`. This recommendation is optional; UUID-based host IDs remain supported.
+
+A public-key-derived host ID is currently an identifier only. OpenAI does not verify possession of the private key as part of this flow.
+
+For a UUID-based host ID, generate a [UUIDv4](https://www.rfc-editor.org/rfc/rfc9562.html#section-5.4) once per host, prefix its hyphenated string form with `urn:uuid:`, and persist the value for reuse across sign-ins. The accepted formats are:
+
+| Format                                   | Guidance                                                                                              |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `urn:ietf:params:oauth:jwk-thumbprint:…` | Recommended when choosing a host-ID format. Derive the URI from the host's public key using RFC 9278. |
+| `urn:uuid:…`                             | Supported alternative. Generate a UUID and store its URI once for the host’s lifecycle.               |
+| `did:key:<key>`                          | Use `did:key`, not another DID method.                                                                |
+
+## From first launch to first inference
+
+On first launch, your client prepares a host ID and opens the browser for sign-in, client registration, and consent to use the user’s ChatGPT plan. It exchanges the authorization code for OAuth tokens, validates the ID token and granted scopes, and stores the user’s basic account info and credentials. It then uses the access token to send a Responses API request and process the stream through completion. Later sign-ins reuse the saved client ID.
+
+
+
+> Illustration: Your client chooses a ChatGPT account, persists or reuses the host ID, starts a listener, and generates fresh state, nonce, and PKCE. It opens OAuth in the system browser with a new registration or a saved client_id. OpenAI authorization completes required authentication or consent, then redirects through the browser to the loopback callback with code, state, and an issued client_id for new registration. Your client validates state, then exchanges the code at the OpenAI token endpoint using the issued or saved client_id and PKCE. It receives tokens and granted scopes, validates the ID token and scopes, and stores the user’s basic account info and credentials. It calls the Responses API with a bearer access token, store: false, and stream: true, then processes stream events through response.completed.
+
+
+
+## Next steps
+
+- [UI/UX guidelines](https://developers.openai.com/siwc/ui-ux-guidelines): Design the sign-in, usage, and plan-selection experience for ChatGPT plan usage.
+- [Sign in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in): Register your client, validate the ID token and ChatGPT plan permission, and save credentials.
+- [Accounts and sessions](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions): Manage ChatGPT accounts, refresh tokens, and protect credentials.
+- [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference): List available models and stream a Responses API request through completion.
+- [Codex app-server](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server): Configure Codex app-server to use an OAuth access token authorized for ChatGPT plan usage.
+- [Self-hosted VMs](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms): Prepare a VM host ID and securely transfer the SIWC credentials associated with the selected ChatGPT account.
+- [Token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference): Look up token-response fields, token lifetimes, and access-token claims.
+- [Errors and recovery](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery): Handle declined consent, request failures, and revoked sessions.
+- [Preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations): Review current Responses API requirements and Codex app-server limitations.
+
+---
+
+# Accounts and sessions
+
+## Managing ChatGPT accounts
+
+Your app needs to manage multiple account registrations so users can choose an existing ChatGPT account or add another. Keep each registration’s basic account info, issued client ID, and credentials separate, even when two registrations have the same email address. Use distinct, stable labels and show the active ChatGPT account in the app’s account picker.
+
+When signing in again to the same account on the same host, reuse the registration’s issued `client_id` and stable `ext_agent_host_id`. Signing out or switching back to a saved ChatGPT account does not create a new client. See [Store credentials in a local file](https://developers.openai.com/siwc/token-sharing-open-source/sign-in#5-store-credentials-in-a-local-file) for the credential record format and storage details.
+
+
+
+
+## Switching ChatGPT accounts
+
+Keep each registration’s issued client ID and credentials separate. Email helps users recognize an account but may be identical across account registrations. Use a distinct, stable label for each account registration, and keep its issued client ID associated with the validated ID-token identity.
+
+**Reauthorization:** Use the same authorize endpoint with the selected account’s issued `client_id` and fresh `state`, `nonce`, and PKCE values. Omit your app’s `agent_name_hint` from reauthorization requests. Include this host’s stable `ext_agent_host_id`. Send a retained `id_token` as `id_token_hint`; a saved email may also be sent as `login_hint`. Under the [expected returning sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in#2-start-authorization), `id_token_hint` skips the unified session selector. It does not change the workspace bound to this client or replace validation of the newly issued ID token. Follow [Validate the ID token and ChatGPT plan permission](https://developers.openai.com/siwc/token-sharing-open-source/sign-in#4-validate-the-id-token-and-chatgpt-plan-permission) before replacing credentials.
+
+Within your OSS app, you may choose to offer an account picker that allows the user to:
+
+- **Continue with a saved ChatGPT account:** Repeat OAuth with that account’s issued `client_id` and fresh state, nonce, and PKCE values. Keep the same host ID. Include retained login hints.
+- **Use a different ChatGPT account:** Select its existing registration or register a new one with `client_id=dynamic_agent_client`. Switching accounts does not require signing out of every other saved account.
+- **Sign out:** Stop requests. Attempt [End the renewable session](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions#end-the-renewable-session) below before clearing the selected account’s access, refresh, and ID tokens. Retain its account/client mapping and this host’s ID for a later sign-in.
+
+Display the active ChatGPT account in settings or the account menu. Complete and validate the selected account’s OAuth flow before making it active. Never overwrite another account registration’s credentials or combine one registration’s client ID with another registration’s tokens.
+
+### End the renewable session
+
+When signing out, revoke the renewable session using the `revocation_endpoint` from `https://auth.openai.com/.well-known/openid-configuration`. Send a form-encoded `POST` with `token=<REFRESH_TOKEN>`, `token_type_hint=refresh_token`, and the issued `client_id`. An empty HTTP `200` is the revocation success response, including for an already-invalid token. Stop using the tokens and clear them locally after revocation.
+
+For a network failure or `5xx`, retry with backoff while the refresh token is still available. If you finish signing out locally without confirming revocation, clear the local tokens and tell the user that remote revocation was not confirmed. The user can disconnect the app in ChatGPT Settings. Revoking this session does not delete the registered client.
+
+## Refreshing tokens
+
+Use standard OAuth refresh near access-token expiry. POST form-encoded `grant_type=refresh_token`, the issued `client_id` saved with this token set (not `dynamic_agent_client`), the saved `refresh_token`, and `resource=https://api.openai.com/v1` to `https://auth.openai.com/api/accounts/oauth/token`; omit `scope` to retain the grant.
+
+Store and use the latest replacement, and serialize refreshes for the same session so two processes do not race a rotating token.
+
+See [Token lifetimes](https://developers.openai.com/siwc/token-sharing-open-source/token-reference#token-lifetimes) for expiry and renewal limits, and [Refresh errors](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery#refresh-errors) for recovery.
+
+## Credential security
+
+Keep access, refresh, and retained ID tokens in protected local or self-hosted runtime storage. Keep tokens out of browser storage, source control, logs, analytics, and support transcripts.
+
+Never put access or refresh tokens in URLs. Send an ID token as `id_token_hint` only to the OpenAI authorization endpoint, and redact authorization URLs containing that hint from logs and diagnostics. A host ID is an opaque identifier, not a token or proof of identity.
+
+If credentials are compromised, instruct the user to disconnect the app in ChatGPT Settings.
+
+## Tracking usage
+
+Link from your tool’s usage-tracking pages to [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage), where users can review app usage and manage each app’s access to their ChatGPT plan and credits.
+
+
+
+> Illustration: Example ChatGPT App limits settings for Vercel, Canva, and Figma. Each app has a Manage limits action that opens a dialog where users can allow the app to use their ChatGPT plan, set the app’s weekly usage limit from 10% to 100%, and choose whether it can use credits after reaching plan limits. Changes apply only to this interactive example.
+
+
+
+For ChatGPT Plus users, the five-hour usage limit is shared across all apps where they use their ChatGPT plan, including private and open-source clients. Usage in one app contributes to the same five-hour usage total, and no app receives a separate allowance. The five-hour usage limit does not apply for Pro users.
+
+---
+
+# Codex app-server
+
+## Using Codex app-server
+
+If your app uses Codex app-server, configure it to send inference requests to the Responses API using an OAuth access token authorized for the user’s ChatGPT plan. You can use `model/list` to populate a model selector, but with the provider configuration below it can return a bundled client catalog. Treat it as a catalog, not an entitlement check; a successfully completed inference turn verifies access to the selected model for that request.
+
+1. **Pass the OAuth access token to the child process.** After exchanging the authorization code, read the token response’s `access_token` field. Set `ACCESS_TOKEN` in the app-server child process’s environment to that value.
+2. **Start app-server with a Responses provider.**
+
+```bash
+   codex app-server --listen stdio:// \
+     -c 'model_provider="openai_chatgpt_plan"' \
+     -c 'model_providers.openai_chatgpt_plan.name="ChatGPT plan"' \
+     -c 'model_providers.openai_chatgpt_plan.base_url="https://api.openai.com/v1"' \
+     -c 'model_providers.openai_chatgpt_plan.env_key="ACCESS_TOKEN"' \
+     -c 'model_providers.openai_chatgpt_plan.wire_api="responses"' \
+     -c 'model_providers.openai_chatgpt_plan.requires_openai_auth=false' \
+     -c 'model_providers.openai_chatgpt_plan.supports_websockets=false'
+```
+
+   Codex sends the user’s OAuth access token as `Authorization: Bearer <access_token>` on requests to `/v1/responses`. No separate Codex sign-in is required.
+
+3. **Drive the conversation over stdin/stdout.** Send newline-delimited JSON messages. Start with `initialize` and include these fields in `params.clientInfo`:
+   - `name`: A stable identifier for your app, such as `my_app`. Codex uses this as the request originator for attribution. Use the same name across installations.
+   - `title`: Your app’s human-readable name, such as `My App`.
+   - `version`: Your app’s version, such as `1.2.3`. Codex includes it with the app identifier in the User-Agent.
+
+   These fields identify the calling app. The name should match the `agent_name_hint` that your app sends as part of new user registration flow. Wait for `initialize` to succeed, then send `initialized`. Send `thread/start` with your selected model and save `result.thread.id`. Send `turn/start` with that `threadId` and the user’s message. Display `item/agentMessage/delta` events. When `turn/completed` arrives, check `turn.status`: only `completed` indicates success; `failed` and `interrupted` do not.
+
+4. **Manage token renewal in your app.** Obtain a replacement access token using the flow in [Refreshing tokens](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions#refreshing-tokens). Restart app-server with the updated `ACCESS_TOKEN`, initialize the new process, and resume the conversation using `thread/resume` with the saved thread ID.
+
+Your app should read its own token file and supply the access token to the child process.
+
+---
+
+# Errors and recovery
+
+## ChatGPT plan use isn’t enabled
+
+This branch applies when consent is declined or the OAuth result lacks permission to use the user’s ChatGPT plan. Do not proceed to inference on this path.
+
+After a successful OAuth exchange, check the returned scopes for `chatgpt.tokens.use.direct`. If the result contains a valid ID token without that permission, retain the sign-in but mark ChatGPT plan usage as disabled. A coding harness still needs a way to pay for inference, so offer a clear choice: enable ChatGPT plan usage or configure another supported billing path, such as the user’s own API key.
+
+When the user explicitly chooses to enable ChatGPT plan usage from your tool’s settings, including after an earlier decline, repeat OAuth with the saved client ID and the **complete requested scope set**, explicitly including `chatgpt.tokens.use.direct`. Request consent with `force_reconsent=true` only after OpenAI confirms deployment for your integration; the existing OAuth `prompt=consent` mechanism remains supported before that rollout. Your app should not force consent on every ordinary sign-in. Recheck the granted scopes afterward. These are OAuth authorization parameters, not the unsupported Responses request-body `prompt` field.
+
+## Errors and connection recovery
+
+ChatGPT plan usage errors stop inference. OpenAI does not silently switch the request to another billing path. Preserve the actual HTTP status, response body shape, error code when present, and request ID.
+
+### Before a stream opens
+
+Do not assume every failure has the standard API `error` object. Direct-route admission can return a body such as `{"detail":"..."}` before a Responses request starts. Treat the message as diagnostic text, not a stable machine-readable code.
+
+| Direct-admission status | Recovery                                                                                                                                     |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `401`                   | The required signed identity or direct permission was not accepted. Check the selected ChatGPT account and granted scopes.                   |
+| `403`                   | A policy or permission check, such as the permitted serving region, prevented admission. Surface the restriction and verify the integration. |
+| `503`                   | Direct routing is unavailable or not enabled. Preserve credentials and use bounded backoff for temporary failures.                           |
+
+### Structured Responses errors
+
+When a Responses-layer error object is returned, use its exact `error.code` and `error.param`. The following codes have specific recovery actions; they are not an exhaustive list of authentication, routing, or transport failures.
+
+| Returned code                                                                     | HTTP status | What to do                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subscription_sharing_user_not_eligible`                                          | 403         | ChatGPT plan usage is unavailable for the selected user, workspace, or policy. Explain the restriction; do not repeat the same request or loop through OAuth.                                                                                                                                                 |
+| `subscription_sharing_usage_limit_exceeded`                                       | 429         | Pause new requests that use the user’s ChatGPT plan and link to [ChatGPT settings → Usage](https://chatgpt.com/settings/usage). Do not assume the entire plan is empty or infer a reset time from this code alone; an app-specific limit can also apply. |
+| `subscription_sharing_usage_unavailable`                                          | 503         | Usage availability could not be checked. Preserve credentials and retry later with bounded backoff.                                                                                                                                                                                                           |
+| `subscription_sharing_unsupported_capability`                                     | 400         | Inspect `error.param` and remove the unsupported input, tool, execution feature, model, or service-tier override. Do not retry the same invalid body.                                                                                                                                                         |
+| `subscription_sharing_route_not_supported`                                        | 403         | Check the exact HTTP method and endpoint. The examples in [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) use `POST /v1/responses`; support for another client type or route is not permission to use it here.                                                                   |
+| `subscription_sharing_invalid_user`                                               | 401         | The subscriber context could not be validated. Preserve the request ID and diagnose the credential failure. Ask the user to sign in again after confirmed revocation or a terminal refresh error.                                                                                                             |
+| `chatpass_v2_scope_not_authorized` or `chatpass_v2_invalid_authorization_context` | 403         | The signed permission context does not authorize the operation. Check the client and grant configuration rather than retrying or changing billing.                                                                                                                                                            |
+| `subscription_sharing_user_unavailable`                                           | 503         | User/workspace information is temporarily unavailable. Preserve credentials and retry with bounded backoff.                                                                                                                                                                                                   |
+
+### Disconnection
+
+OpenAI does not currently notify your tool when a user disconnects the app in ChatGPT settings. When a request or refresh confirms the disconnection, stop using the invalid token set and ask the user to sign in again. Do not erase credentials solely because of a temporary network or infrastructure failure.
+
+## Refresh errors
+
+Handle errors by their machine-readable code:
+
+- **Unusable refresh token:** `invalid_grant` on refresh, `invalid_refresh_token`, `token_expired`, `refresh_token_expired`, `refresh_token_invalidated`, or `refresh_token_reused`. Clear unusable tokens and repeat OAuth with the saved issued client ID.
+- **Invalid client:** `invalid_client`. Fix the client configuration.
+
+Continue to [Preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+
+---
+
+# Models and inference
+
+Use the access token saved during [Sign in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) to populate a model picker and complete the first inference request.
+
+## 1. List available models
+
+Before showing a model picker, request the selected ChatGPT account’s model catalog with the same access token you will use for inference:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  https://api.openai.com/v1/models \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  | jq '[.models[] | select(.visibility == "list") | {slug, display_name}]'
+```
+
+The model-list response contains a `models` array. This example keeps models intended for display (`visibility: "list"`) and preserves the server's ordering. Show `display_name` in your UI and pass the selected `slug` as `model` in the next step. Refresh these choices when the user switches ChatGPT accounts. If you use Codex app-server, its `model/list` RPC may use a bundled or cached catalog. Use the request above when your UI needs current account-specific model choices.
+
+## 2. Call the Responses API
+
+To perform inference on behalf of the user, send the OAuth access token as `Authorization: Bearer <ACCESS_TOKEN>` to `POST https://api.openai.com/v1/responses`.
+
+**Supported endpoint:** Use the public Responses API endpoint above for this ChatGPT plan usage flow; do not point it at ChatGPT's `backend-api` endpoints. Use a model available to the signed-in account.
+
+**Set `store` to `false` and `stream` to `true` on each HTTP inference request in this flow.** Consume the response as a stream of events.
+
+Read the saved `access_token` for the selected ChatGPT account into the process environment as `ACCESS_TOKEN` before running these examples.
+
+### curl example
+
+```bash
+curl --no-buffer https://api.openai.com/v1/responses \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-6.1-sol",
+    "input": [
+      {
+        "role": "user",
+        "content": "Say exactly: Hello, world!"
+      }
+    ],
+    "store": false,
+    "stream": true
+  }'
+```
+
+### Python SDK example
+
+Set the `api_key` parameter to the OAuth access token; the SDK sends it as the bearer credential.
+
+Stream with an OAuth access token authorized for ChatGPT plan usage
+
+```python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.environ["ACCESS_TOKEN"],  # OAuth token sent as Bearer.
+    base_url="https://api.openai.com/v1",
+    max_retries=0,
+)
+
+completed = False
+with client.responses.create(
+    model="gpt-6.1-sol",
+    input=[{"role": "user", "content": "Say exactly: Hello, world!"}],
+    store=False,
+    stream=True,
+) as stream:
+    for event in stream:
+        if event.type == "response.output_text.delta":
+            print(event.delta, end="", flush=True)
+        elif event.type == "response.failed":
+            error = event.response.error
+            code = error.code if error else "unknown_error"
+            raise RuntimeError(f"Response failed: {code}")
+        elif event.type == "response.completed":
+            completed = True
+
+if not completed:
+    raise RuntimeError("Stream ended without response.completed.")
+print()
+```
+
+
+## 3. Wait for completed inference
+
+Treat inference as successful only after receiving `response.completed`. Read through the terminal event. A usage-limit error can arrive as `response.failed` with `subscription_sharing_usage_limit_exceeded` or `subscription_sharing_usage_unavailable` after streaming has begun. Apply the corresponding recovery in [Structured Responses errors](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery#structured-responses-errors). Handle `response.incomplete`, explicit errors, and interrupted streams separately from `response.completed`.
+
+---
+
+# Preview limitations
+
+## Preview behavior and limitations
+
+These limits apply to ChatGPT plan usage through Sign in with ChatGPT and `https://api.openai.com/v1`, both directly and through Codex app-server.
+
+### Responses API requirements
+
+- **HTTP requests:** Set `store: false` and `stream: true`. Send `input` as an array containing the context needed for each request. Use `instructions` or developer messages; explicit `{type: "message", role: "system"}` items are rejected.
+- **Unsupported fields:** Omit `background`, `conversation`, `max_output_tokens`, `max_tool_calls`, `metadata`, `moderation`, `multi_agent`, `prompt`, `prompt_cache_retention`, `safety_identifier`, `temperature`, `top_logprobs`, `top_p`, `truncation`, and `user`.
+- **Conversation state:** Omit `previous_response_id` over HTTP and send the required history in `input`. WebSocket continuation can reference only responses from the same authenticated connection; it does not provide persistent conversation storage.
+- **Supported tools:** Group function/custom tools in namespaces or supply them through `additional_tools` input items. Web search remains subject to model and account/workspace policy.
+- **Unsupported tools:** Image generation, file search, Code Interpreter, native computer use, hosted MCP/connectors, and Responses `tool_search`. Client-side execution does not make `tool_search` supported. `programmatic_tool_calling` is not accepted in top-level `tools` on this route.
+- **Inputs:** Text, images, and files are supported when the selected model accepts them. Audio/video input, the Files upload API, and the transcription API are not supported by this flow.
+
+### Codex app-server behavior
+
+- **Transport:** The [Codex app-server configuration](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server) uses stdio between your app and app-server, then HTTP/SSE to Responses. App-server sets `store: false` and `stream: true`; `supports_websockets=false` selects HTTP for this configuration.
+- **Local tools and agents:** Codex can run shell and MCP tools and coordinate child agents through supported function/custom tool calls. These are separate from hosted Responses tools. Configurations that emit Responses `tool_search` will fail.
+- **Inputs and history:** Use app-server's RPC inputs; it does not accept arbitrary Responses parameters. Local thread history and `thread/resume` still work with `store: false`.
+- **Token renewal:** Your app must refresh the OAuth token. With the [`env_key` setup](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server#using-codex-app-server), restart app-server with the renewed `ACCESS_TOKEN`, then resume the saved thread.
+
+---
+
+# Registration and sign-in
+
+Start first-time registration with `client_id=dynamic_agent_client`, include the host’s `ext_agent_host_id`, and set `agent_name_hint` to your app’s actual name, used consistently across installations. After the user names and authorizes the agent, the callback returns its issued `client_id`. Save it with the registration for that ChatGPT account and reuse it for later sign-ins to the same account. Send the same `ext_agent_host_id` for the same host. `dynamic_agent_client` is the first-time registration entrypoint, not the client ID to save or use for token exchange. This direct flow needs neither a client secret nor a partner API key.
+
+
+
+
+## 1. Choose a ChatGPT account and prepare the host
+
+When the user first opens your tool, show a Sign in with ChatGPT button labeled **Continue with ChatGPT**, following the [UI/UX Guidelines](https://developers.openai.com/siwc/ui-ux-guidelines) for approved OpenAI branding. On later launches, let them choose a saved ChatGPT account or add another account or workspace. Keep a new sign-in attempt separate from the active account until its identity is validated.
+
+Choose and persist this host’s `ext_agent_host_id` before its first sign-in, or reuse its existing value for the same host. For initial dynamic registration, use your app’s actual name consistently as `agent_name_hint`. See [A client vs. an agent host](https://developers.openai.com/siwc/token-sharing-open-source#a-client-vs-an-agent-host) and [Managing ChatGPT accounts](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions#managing-chatgpt-accounts) for these choices.
+
+## 2. Start authorization
+
+Start your callback listener and generate a fresh random `state`, OIDC `nonce`, and PKCE verifier for each attempt. Keep those values and the exact callback URI until the callback completes.
+
+For a new ChatGPT account, send `client_id=dynamic_agent_client`. Include your app’s `agent_name_hint` as well as the host’s `ext_agent_host_id`.
+
+For a previously registered account, use its saved issued `client_id` instead of `client_id=dynamic_agent_client`. A retained `id_token_hint` identifies the original account; a saved email can also be sent as `login_hint`.
+
+**Expected returning sign-in:** For routine reauthorization with an issued dynamic-client ID, without `id_token_hint` the user sees the account selector screen, then redirects, with no workspace selection or consent screen. With `id_token_hint`, the flow skips account selection and redirects. The client stays bound to its registered workspace.
+
+Open the system browser at `https://auth.openai.com/api/accounts/authorize` and URL-encode each query parameter value. Send the following parameters in the authorization request:
+
+| Parameter               | Value and purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `client_id`             | `dynamic_agent_client` when the user registers their client for the first time. For future reauthorization through the regular OAuth flow, reuse the same issued client ID returned during registration.                                                                                                                                                                                                                                                                                                                                                                     |
+| `agent_name_hint`       | Your app’s actual name, such as `OpenClaw`. Use it consistently across installations and include it only on initial dynamic-registration requests. Omit it from reauthorization with an issued client ID. The user can edit the name before approval; it is display metadata, not identity.                                                                                                                                                                                                                                                                                  |
+| `ext_agent_host_id`     | Required host identifier, distinct for each host.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `id_token_hint`         | For reauthorization, the ID token retained from this account’s previous successful sign-in. The hint may be expired; it identifies the account, not a valid authenticated session. Omit it after signing out or if none was retained. Under the [expected returning sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in#2-start-authorization), it skips the unified session selector.                                                                                                                                                                                          |
+| `login_hint`            | For reauthorization, optional email hint, saved from this account’s validated ID token. For example, `login_hint=user%40example.com`. If you also send `id_token_hint`, keep both hints associated with the same selected ChatGPT account. Used to pre-select the user account as part of the OAuth flow.                                                                                                                                                                                                                                                                    |
+| `response_type`         | `code`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `redirect_uri`          | Use an HTTP loopback callback on `127.0.0.1` from initial registration onward, for example `http://127.0.0.1:1455/auth/callback`. Start the listener before opening the browser. Later sign-ins may use another available port, such as `http://127.0.0.1:54321/auth/callback`; only the port may vary. Keep the scheme, host, and path unchanged: `/callback` does not match `/auth/callback`. Within each authorization attempt, send the exact same URI, including its selected port, in the authorization request and code exchange. Do not substitute with `localhost`. |
+| `scope`                 | Identity scopes: `openid profile email`. ChatGPT plan usage scopes: `offline_access resource.invoke chatgpt.tokens.use.direct`.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `resource`              | `https://api.openai.com/v1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `state`                 | A fresh random value bound to this authorization attempt; validate it on return.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `nonce`                 | A fresh random value for ID-token validation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `code_challenge_method` | `S256`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `code_challenge`        | The base64url-encoded SHA-256 digest of the PKCE verifier, without padding.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+For a new registration, the user signs in and reviews the requested permissions in the browser. Returning sign-in follows the expected flow above. The browser then returns to your loopback callback.
+
+## 3. Handle the callback and exchange the code
+
+If the callback contains `error=access_denied`, validate `state`, stop the attempt, and do not exchange a code. See [ChatGPT plan use isn’t enabled](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery#chatgpt-plan-use-isnt-enabled) for authorizing it later. The new-registration callback supplies the client ID used in the exchange. A successful **new registration** returns `code`, `state`, and the issued `client_id`. The callback may also include `scope`, as shown below. On reauthorization, the callback may omit `client_id`; retain the exact client ID already associated with the pending request. If the callback supplies a different client ID, reject the result rather than replacing the selected account’s registration. Use the token response’s granted scopes when deciding whether ChatGPT plan usage is enabled:
+
+```text
+YOUR_CALLBACK
+  ?code=<AUTHORIZATION_CODE>
+  &scope=chatgpt.tokens.use.direct+email+offline_access+openid+profile+resource.invoke
+  &state=<ORIGINAL_STATE>
+  &client_id=<ISSUED_CLIENT_ID>
+```
+
+1. Validate `state` against the pending authorization attempt and handle an OAuth `error` before using the result.
+2. For new registration, retain the issued `client_id`, such as `oaiapp_...`. Do not save `dynamic_agent_client` as the connection’s issued ID. If a new-registration callback does not include an issued ID, treat registration as incomplete.
+3. **Exchange the code.** POST a form-encoded `authorization_code` grant to `https://auth.openai.com/api/accounts/oauth/token` with the issued `client_id`, `code`, `code_verifier`, the same `redirect_uri`, and the same `resource`. No client secret is required.
+
+If code exchange returns `invalid_grant`, discard that code and start a fresh authorization with the issued client ID retained for this attempt. The token endpoint returns the credentials and granted scopes used in the next steps.
+
+
+
+
+## 4. Validate the ID token and ChatGPT plan permission
+
+**Validate the ID token.** Verify its signature against OpenAI’s published JWKS. Check the issuer, audience against the issued client ID, expiration, and the nonce saved for this attempt. Use its validated `sub` as the account identity. Email and `sub` are not workspace identifiers; retain the issued client ID with the verified identity to keep registrations separate. The signature-validation example in [On your website](https://developers.openai.com/siwc/website) also applies here; this OSS flow remains a public client without a secret.
+
+For a returning account, confirm the new ID token’s verified identity matches the selected account before replacing credentials. Check the token response’s granted scopes for `chatgpt.tokens.use.direct` before proceeding to inference. A valid ID token alone does not authorize ChatGPT plan usage.
+
+
+
+
+## 5. Store credentials in a local file
+
+Keep a separate protected credential record for each issued client ID and its verified account identity. Save the validated identity, tokens, granted scopes, and expiry information so the tool can resume and refresh after restart. Retain the ID token so your tool can provide `id_token_hint` on a later sign-in. Keep the stable host ID with the runtime it identifies. The example below shows one local credential record; paths and filenames are app-defined. The issued client ID comes from the new-registration callback. Build `scopes` from the returned, space-separated `scope` value.
+
+```json
+{
+  "email": "user@example.com",
+  "issuer": "https://auth.openai.com",
+  "subject": "<VALIDATED_ID_TOKEN_SUBJECT>",
+  "client_id": "<ISSUED_CLIENT_ID>",
+  "ext_agent_host_id": "urn:uuid:...",
+  "id_token": "<ID_TOKEN>",
+  "access_token": "<ACCESS_TOKEN>",
+  "refresh_token": "<REFRESH_TOKEN>",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scopes": [
+    "chatgpt.tokens.use.direct",
+    "email",
+    "offline_access",
+    "openid",
+    "profile",
+    "resource.invoke"
+  ],
+  "saved_at": "<UTC timestamp when your app receives this token response>"
+}
+```
+
+Store credential files under an app-defined path such as `~/.config/YOUR_TOOL/`. Write files atomically with owner-only permissions (`0600` on Unix), and never commit or log them. Replace the access token, expiry, granted scopes, and rotating refresh token together after a successful refresh.
+
+---
+
+# Self-hosted VMs
+
+Use this guide when you run an open-source app on a remote virtual machine (VM).
+
+## 1. Create a host ID for the VM
+
+Before importing credentials, create and persist a stable `ext_agent_host_id` for the VM.
+
+## 2. Complete OAuth locally
+
+A `127.0.0.1` callback reaches the computer running the browser, not the remote VM. Complete OAuth locally with the same tool/client for the same user and workspace you will use on the VM.
+
+
+
+
+## 3. Transfer the protected credentials
+
+Transfer the selected registration's protected credential file to the tool's documented VM path over a secure channel such as SSH. Include its issued `client_id`, `access_token`, `refresh_token`, and other saved metadata such as a retained `id_token`.
+
+Preserve the host ID assigned to the VM when importing the credentials so a copied laptop ID does not overwrite it.
+
+## 4. Let the VM manage token refreshes
+
+Let the VM own later refreshes. Use its own host ID for its next authorization.
+
+This procedure transfers an existing credential session. Host-specific usage attribution and revocation of ChatGPT plan access for transferred sessions are not yet available.
+
+---
+
+# Token reference
+
+## Token response and refresh tokens
+
+With `offline_access` granted, the authorization-code exchange returns a `refresh_token` alongside the `access_token`. The token response includes `access_token`, `refresh_token`, `id_token`, `token_type`, `expires_in`, `scope`, and `earliest_refresh_at`. A successful code exchange returns HTTP `200`. A successful `grant_type=refresh_token` exchange also returns HTTP `200`, with a new access token and a replacement refresh token.
+
+Read and save the `refresh_token` field from the token-endpoint response so your app can renew access. The refresh token is separate from the access-token claims and does not appear in the browser callback.
+
+## Token lifetimes
+
+Access tokens are valid for one hour (`expires_in: 3600`).
+
+Refresh tokens are valid for 30 days. Each successful refresh returns a replacement refresh token with a fresh 30-day lifetime. Successive replacements have no fixed limit while each token remains valid.
+
+Follow [Refreshing tokens](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions#refreshing-tokens) to replace credentials safely.
+
+## Access-token claims
+
+The following reference describes the 10 top-level fields and two nested fields in the access-token payload. The example uses placeholders for account-specific and token-specific values.
+
+| Field                                                        | Type    | Meaning                                                       |
+| ------------------------------------------------------------ | ------- | ------------------------------------------------------------- |
+| `sub`                                                        | string  | Opaque subject identifier.                                    |
+| `aud`                                                        | string  | Resource audience; `https://api.openai.com/v1` in this flow.  |
+| `client_id`                                                  | string  | Issued OAuth client ID associated with the token.             |
+| `scope`                                                      | string  | Space-separated scopes granted to this token.                 |
+| `https://api.openai.com/auth`                                | object  | OpenAI-managed authentication metadata.                       |
+| `["https://api.openai.com/auth"]["per_user_salt"]`           | string  | Opaque salt value within the authentication metadata object.  |
+| `["https://api.openai.com/auth"]["encrypted_auth_metadata"]` | string  | Opaque encrypted authentication metadata for OpenAI services. |
+| `iss`                                                        | string  | Token issuer; `https://auth.openai.com` in production.        |
+| `iat`                                                        | integer | Issued-at time in Unix seconds.                               |
+| `exp`                                                        | integer | Expiration time in Unix seconds.                              |
+| `jti`                                                        | string  | Token identifier.                                             |
+| `nbf`                                                        | integer | Not-before time in Unix seconds.                              |
+
+The two nested field paths above refer to keys inside the `https://api.openai.com/auth` object.
+
+```json
+{
+  "sub": "<SUBJECT_IDENTIFIER>",
+  "aud": "https://api.openai.com/v1",
+  "client_id": "<ISSUED_CLIENT_ID>",
+  "scope": "chatgpt.tokens.use.direct email offline_access openid profile resource.invoke",
+  "https://api.openai.com/auth": {
+    "per_user_salt": "<OPAQUE_SALT>",
+    "encrypted_auth_metadata": "<OPAQUE_ENCRYPTED_AUTH_METADATA>"
+  },
+  "iss": "https://auth.openai.com",
+  "iat": 1790032532,
+  "exp": 1790036132,
+  "jti": "<TOKEN_IDENTIFIER>",
+  "nbf": 1790032532
+}
+```
+
+Treat the OpenAI authentication metadata as opaque; your app does not need to interpret it to store or use the access token. `refresh_token` is a separate field in the OAuth token response.
+
+---
+
+# UI/UX guidelines
+
+Help users understand when your app uses their ChatGPT plan, where to manage usage, and what to do when they reach a limit. Use these guidelines for ChatGPT plan usage and the approved [sign-in button formats](https://developers.openai.com/siwc/website).
+
+
+
+
+## Confirm ChatGPT plan use after the first sign-in
+
+Show a welcome modal only the first time a user signs in to your app with ChatGPT plan usage enabled. Do not show it again on later sign-ins. Explain that eligible AI requests in your app will use their ChatGPT plan and that they can manage usage in ChatGPT settings. Let them dismiss the message and continue.
+
+Use a clear confirmation, such as **You're using your ChatGPT plan**, with a **Got it** action.
+
+
+
+> Illustration: First-sign-in confirmation: the ChatGPT logo appears above You're using your ChatGPT plan. The message explains that eligible usage in the app uses the ChatGPT plan and can be managed in ChatGPT settings. A primary Got it button dismisses the modal in the partner app.
+
+
+
+
+
+
+## Offer ChatGPT plan use in settings
+
+Offer users the option to use their ChatGPT plan during onboarding or billing, and keep it available later in settings. Use **Continue with ChatGPT** when the action starts the sign-in flow.
+
+Explain that users can use their ChatGPT plan in your app. Distinguish ChatGPT plan usage from your app's own subscription or charges.
+
+
+
+> Illustration: Settings card: Use your ChatGPT plan. The description says Complete eligible AI requests in this app with usage included in your ChatGPT plan or credits balance. A black Continue with ChatGPT button includes the ChatGPT logo.
+
+
+
+## Link to ChatGPT usage
+
+On your app's usage page, place a **Manage usage** link near the usage summary. Open [ChatGPT usage settings](https://chatgpt.com/settings/usage) so users can review usage and update settings for their plan or your app.
+
+
+
+> Illustration: Partner usage summary: ChatGPT plan usage over the last 30 days, with placeholders for Total, Peak per day, and Active days. A callout immediately below the summary says View and manage your ChatGPT usage and provides a Manage usage link to ChatGPT usage settings.
+
+
+
+## Show when the ChatGPT plan is in use
+
+When requests use the user's ChatGPT plan, display **Using ChatGPT plan** near the composer or model selector. Include a **Manage usage** link to [ChatGPT usage settings](https://chatgpt.com/settings/usage), where users can review usage and adjust limits.
+
+
+
+> Illustration: An open Model speed menu appears above a message composer. It lists Instant, Medium with a checkmark, and High, each with a distinct brain icon. Fast mode is switched on beside Uses your plan or credits faster. A blue row at the bottom shows the ChatGPT logo, Using ChatGPT plan, and a Manage usage button linking to ChatGPT usage settings. The composer contains an attachment button, Start chatting or describe a task..., the selected Medium model speed, and a microphone button.
+
+
+
+## Offer options when users reach a usage limit
+
+When your app receives a usage-limit error, direct the user to ChatGPT usage settings. The limit may apply to their ChatGPT plan or specifically to your app.
+
+- Make **Manage usage** the primary action. Open [ChatGPT usage settings](https://chatgpt.com/settings/usage) so the user can review the applicable limit.
+- If your app offers its own credits, present an option to buy them as a secondary action.
+
+Use a modal or a compact message for this state. Keep the ChatGPT identity visible in the compact version, and preserve the same action hierarchy in both.
+
+
+
+> Illustration: Two examples of the same usage-limit state: a centered modal and a compact card with a ChatGPT header. Both say Usage limit reached and direct users to review their plan or app limit in ChatGPT settings. Both show Manage usage as the primary action and Buy app credits as an optional secondary action.
+
+
+
+
+
+
+## Invite existing users to sign in with ChatGPT
+
+Show a banner to users who signed in with another method, such as Google. Explain that they can use their ChatGPT plan in your app, and use **Continue with ChatGPT** as the action.
+
+Lead users to the sign-in flow from settings. If your integration requires a new sign-in, guide them to sign out and sign back in with ChatGPT.
+
+
+
+> Illustration: A banner for existing users has a New badge, the message Use your ChatGPT plan in this app, and a black Continue with ChatGPT button.
+
+
+
+
+
+
+## Make eligible app plans clear
+
+
+**Your app must clearly show which of its plans support ChatGPT plan usage.** Make this information visible on your pricing or plan-comparison page.
+
+Include **Use your ChatGPT plan** in the feature list for each supported plan. Link **Learn more** to the [OpenAI Help Center](https://help.openai.com) for guidance on ChatGPT plan usage. Use your app's plan names and eligibility rules; the names, prices, and features below are illustrative.
+
+
+
+> Illustration: Example partner pricing comparison with three cards: Free at $0 per month, Pro at $20 per month, and Enterprise with Contact sales. Free has Your current plan and features for explanations, short chats, image generation, and limited memory. Pro has Upgrade to Pro and lists Use your ChatGPT plan with an inline learn more link, followed by in-depth topics, longer chats and uploads, more images, more memory, and planning and tasks. Enterprise lists complex problems, chats over multiple sessions, faster image creation, memory of goals and conversations, agent mode, and projects. These names, prices, and features illustrate a partner app's pricing page.
+
+---
+
+# On your website
+
+Sign in with ChatGPT is currently available to selected commercial partners
+  through a limited trial. To join the waitlist, contact your OpenAI
+  representative.
+
+Add **Continue with ChatGPT** to your website using the OAuth 2.0 Authorization
+Code flow with PKCE and OpenID Connect. Your backend exchanges the authorization
+code, verifies the OpenAI ID token, associates the verified issuer, client ID, and
+subject (`sub`) with an application account, and creates its own session.
+
+
+
+> Illustration: A partner website sign-in modal titled Sign in to Acme. A work email field and Sign in with email button appear above a separate Sign in with ChatGPT button with the ChatGPT logo and an account avatar. Terms and Privacy Policy appear at the bottom of the modal.
+
+
+
+Choose one of these four button formats for your app's sign-in page.
+
+
+
+> Illustration: Four ChatGPT sign-in button formats: Continue with ChatGPT on black or white, and Sign in with ChatGPT on black or white. Each button includes the ChatGPT logo.
+
+
+
+## Before you begin
+
+[Request an OAuth client](https://developers.openai.com/siwc/request-client-id). You need:
+
+- An OpenAI client ID, typically beginning with `oaiapp_`.
+- An exact registered callback URL for each environment.
+- The OpenAI issuer and corresponding authorization, token, and JWKS endpoints.
+- Your registered token-endpoint authentication method and, for a confidential client, its client secret.
+- A backend that can hold short-lived transaction state and create secure application sessions.
+
+OpenAI publishes its production OpenID Connect discovery document at
+`https://auth.openai.com/.well-known/openid-configuration`. Load the `issuer`,
+`authorization_endpoint`, `token_endpoint`, and `jwks_uri` values from that
+document. The production configuration in this example is:
+
+```text
+Issuer: https://auth.openai.com
+Authorization endpoint: https://auth.openai.com/api/accounts/authorize
+Token endpoint: https://auth.openai.com/api/accounts/oauth/token
+JWKS URI: https://auth.openai.com/.well-known/jwks.json
+Client ID: oaiapp_example
+Redirect URI: https://example.com/auth/openai/callback
+```
+
+Replace the illustrative client ID and redirect URI with the values supplied for
+your application. Require the ID token's `iss` claim to exactly match the issuer
+returned by discovery.
+
+OpenAI supports both public and confidential clients. For a confidential client,
+store `OPENAI_CLIENT_SECRET` in your server-side secret manager. Public clients
+don't receive or use a client secret. This guide covers
+identity scopes; [ChatGPT plan usage in open-source apps](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+has a separate authorization and registration flow.
+
+Use a maintained OAuth or OpenID Connect library when possible. The Node.js
+  examples below show the backend operations with Node's crypto module and
+  `jose` for JWT verification. Wire them to your application routes and session
+  store. The sample's in-memory maps illustrate storage; production storage must
+  expire transactions and support atomic, one-time consumption across instances.
+
+## 1. Add the sign-in button
+
+Point the button to your application's sign-in route. In this example, implement
+`/auth/openai` on your backend to create a sign-in transaction and redirect the
+browser to OpenAI's authorization endpoint. The following steps show how to
+generate PKCE values and exchange tokens on the backend.
+
+```html
+<a href="/auth/openai">Continue with ChatGPT</a>
+```
+
+Keep the button discoverable for new and returning users. Use approved OpenAI
+branding and assets.
+
+## 2. Create a one-time sign-in transaction
+
+Generate a fresh `state`, PKCE verifier, S256 challenge, and nonce on your backend.
+Bind the transaction to a server-generated browser session identifier.
+
+```javascript
+export function createSignInTransaction(browserSessionId) {
+  const state = randomValue();
+  const codeVerifier = randomValue(64);
+  const codeChallenge = crypto
+    .createHash("sha256")
+    .update(codeVerifier)
+    .digest("base64url");
+  const nonce = randomValue();
+  const transaction = {
+    state,
+    codeVerifier,
+    codeChallenge,
+    nonce,
+    redirectUri,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  };
+
+  transactions.set(browserSessionId, transaction);
+  return transaction;
+}
+```
+
+
+The example expires transactions after 10 minutes. Store the browser session
+identifier in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie. Keep the verifier and
+other transaction values server-side.
+
+## 3. Redirect to OpenAI
+
+Build the authorization URL on your backend, then redirect the browser to it.
+
+```javascript
+export function buildAuthorizationUrl(transaction) {
+  const authorizationUrl = new URL(authorizationEndpoint);
+  authorizationUrl.search = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: transaction.redirectUri,
+    response_type: "code",
+    scope: "openid profile email",
+    state: transaction.state,
+    code_challenge: transaction.codeChallenge,
+    code_challenge_method: "S256",
+    nonce: transaction.nonce,
+  }).toString();
+
+  return authorizationUrl.toString();
+}
+```
+
+
+These scopes apply to identity sign-in:
+
+| Scope     | Permission                                                           |
+| --------- | -------------------------------------------------------------------- |
+| `openid`  | Request an OpenID Connect identity token.                            |
+| `profile` | Receive available profile claims, such as a name or profile picture. |
+| `email`   | Receive available email and email-verification claims.               |
+
+## 4. Handle the callback and verify state
+
+Recover and consume the original transaction. Verify its expiration and returned
+`state`, and check authorization errors before processing a code. Pass the
+callback URL from the current request and the session identifier from the
+browser's secure cookie.
+
+```javascript
+export function consumeSignInTransaction(browserSessionId, callbackUrl) {
+  const transaction = transactions.get(browserSessionId);
+  transactions.delete(browserSessionId);
+
+  const returnedState = callbackUrl.searchParams.get("state");
+  if (
+    !transaction ||
+    transaction.expiresAt <= Date.now() ||
+    returnedState !== transaction.state
+  ) {
+    throw new Error("Sign-in could not be verified.");
+  }
+
+  if (callbackUrl.searchParams.has("error")) {
+    throw new Error("Sign-in could not be completed.");
+  }
+
+  const code = callbackUrl.searchParams.get("code");
+  if (!code) {
+    throw new Error("The callback did not contain an authorization code.");
+  }
+
+  return { code, transaction };
+}
+```
+
+
+A missing, expired, reused, or mismatched transaction ends sign-in. Never redeem a
+code from an unverified callback. Clear temporary browser state on success and
+failure, and show an actionable sign-in error without exposing credentials.
+
+## 5. Exchange the authorization code
+
+Call the OpenAI token endpoint from your backend using the original redirect URI
+and PKCE verifier. Use the token-endpoint authentication method provisioned for
+your client.
+
+### Public client
+
+An identity-only public client requests `openid`, `profile`, and `email`. It
+authenticates at the token endpoint with `none` and doesn't send a client secret.
+
+```javascript
+export async function exchangePublicClientCode(code, transaction) {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: transaction.redirectUri,
+    client_id: clientId,
+    code_verifier: transaction.codeVerifier,
+  });
+
+  return fetch(tokenEndpoint, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+}
+```
+
+
+### Confidential client
+
+If OpenAI provisioned a confidential client with `client_secret_basic`, use its
+client secret to authenticate the backend token request. Keep PKCE in this flow.
+
+```javascript
+export async function exchangeConfidentialClientCode(code, transaction) {
+  const clientSecret = process.env.OPENAI_CLIENT_SECRET;
+  if (!clientSecret) {
+    throw new Error("The confidential client requires its client secret.");
+  }
+
+  const encodeFormComponent = (value) =>
+    new URLSearchParams({ value }).toString().slice("value=".length);
+  const basicAuthorization = Buffer.from(
+    `${encodeFormComponent(clientId)}:${encodeFormComponent(clientSecret)}`
+  ).toString("base64");
+
+  return fetch(tokenEndpoint, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+      authorization: `Basic ${basicAuthorization}`,
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: transaction.redirectUri,
+      client_id: clientId,
+      code_verifier: transaction.codeVerifier,
+    }),
+  });
+}
+```
+
+
+Send the secret only through the HTTP Basic authorization header. Don't add it to
+the form body. A missing or invalid secret causes the request to fail; OpenAI
+doesn't fall back to public-client authentication. Never expose the secret in
+client-side code, logs, URLs, agent output, or source control.
+
+### Validate the token response
+
+After either request, check the response before using the returned ID token.
+
+```javascript
+export async function readIdentityToken(tokenResponse) {
+  if (!tokenResponse.ok) {
+    const requestId =
+      tokenResponse.headers.get("openai-request-id") ??
+      tokenResponse.headers.get("x-request-id");
+    console.error("OpenAI token exchange failed", {
+      status: tokenResponse.status,
+      requestId,
+    });
+    throw new Error("OpenAI token exchange failed.");
+  }
+
+  const tokens = await tokenResponse.json();
+  if (typeof tokens.id_token !== "string") {
+    throw new Error("The token response did not contain an ID token.");
+  }
+  return tokens.id_token;
+}
+```
+
+
+For standard identity-only sign-in, the required artifact is `id_token`. Don't
+require an OpenAI `access_token` or `refresh_token`; they aren't part of the
+standard identity-only client contract.
+
+## 6. Verify the ID token
+
+Verify the JWT signature against the issuer's JWKS before trusting identity
+claims. Check the issuer, audience, expiration, and original nonce. The example's
+`jwks` value uses `createRemoteJWKSet` from `jose` with the discovery document's
+`jwks_uri`.
+
+```javascript
+export async function verifyOpenAiIdentity(idToken, expectedNonce) {
+  const { payload } = await jwtVerify(idToken, jwks, {
+    issuer,
+    audience: clientId,
+    requiredClaims: ["sub", "exp", "iat"],
+    clockTolerance: 5,
+  });
+
+  if (payload.nonce !== expectedNonce) {
+    throw new Error("The ID token nonce did not match.");
+  }
+  if (typeof payload.sub !== "string" || !payload.sub) {
+    throw new Error("The ID token did not contain a subject.");
+  }
+
+  return payload;
+}
+```
+
+
+Use a maintained JWT library, allow only a small clock-skew tolerance, cache JWKS
+responsibly, and refresh keys when an unfamiliar `kid` appears. This example
+always sends a nonce and requires the same value in the ID token.
+
+## 7. Find, create, or link the local account
+
+Use the verified OpenAI `sub` as the stable external identity. Include the issuer
+and client to prevent collisions across providers and environments.
+
+```javascript
+export function externalIdentityFor(identity) {
+  return {
+    provider: "openai",
+    issuer,
+    clientId,
+    subject: identity.sub,
+    email: identity.email ?? null,
+    name: identity.name ?? null,
+    picture: identity.picture ?? null,
+  };
+}
+```
+
+
+Apply an explicit account-linking policy:
+
+1. If the OpenAI subject is already linked, sign in to the linked local account.
+2. If a signed-in user adds ChatGPT as a sign-in method, or their email matches an existing account, provide a way to confirm and link the accounts. An email match alone isn't proof of account ownership.
+3. If no account exists, allow account creation according to your product, onboarding, and enterprise policies.
+
+## 8. Create your application session
+
+After verification and account resolution, issue your own first-party session.
+The helper below receives your HTTP response and the resolved local user.
+
+```javascript
+export function createApplicationSession(response, localUser) {
+  const sessionId = randomValue();
+  sessions.set(sessionId, {
+    userId: localUser.id,
+    expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+  });
+
+  response.setHeader(
+    "Set-Cookie",
+    `__Host-session=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=28800`
+  );
+  response.writeHead(302, { Location: "/app" });
+  response.end();
+}
+```
+
+
+Use an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie. Don't return an ID token,
+PKCE verifier, authorization code, or client secret to browser JavaScript. Clear
+the temporary sign-in cookie after completing the transaction.
+
+Retain only the identity mapping and user information your application needs.
+Avoid storing raw OpenAI ID tokens after verification unless a separately
+documented requirement demands it.
+
+## Test before launch
+
+- Confirm the registered callback and requested `redirect_uri` match exactly.
+- Generate fresh state, PKCE values, and a nonce for every sign-in.
+- Check that missing, expired, reused, and mismatched transaction state is rejected.
+- Exchange the code with the original verifier and registered client authentication method.
+- Check that a confidential token request with a missing or invalid secret fails.
+- Check that an ID token with an invalid signature, issuer, audience, expiration, or nonce is rejected.
+- Clear temporary authorization state after success and failure.
+- Confirm that signing out clears only the first-party application session.
+
+Next, reuse this flow [in your ChatGPT plugin](https://developers.openai.com/siwc/chatgpt-plugin).

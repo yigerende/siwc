@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "local.siwc.openai.transport",
+  "name": "SIWC OpenAI Transport",
+  "version": "0.2.5",
+  "description": "OpenAI OAuth 出站传输插件：SIWC (Sign in with ChatGPT) token-sharing 渠道。把 SIWC 账号的上游请求改写为 api.openai.com/v1/responses 直连路由（store=false、stream=true、剥除 computer_call 与 tool_search 等未授权项、补齐会话级 prompt_cache_key、额度耗尽按 429 换号），非 SIWC 账号透明转发。",
+  "author": "local",
+  "requires": {
+    "sub2api": ">=0.2.17 <0.3.0",
+    "recommended_sub2api_version": "0.2.17",
+    "tested_sub2api_versions": ["0.2.17"],
+    "plugin_protocol": 1,
+    "transport_api": 1,
+    "ui_bridge": 1
+  },
+  "capabilities": [
+    {
+      "id": "openai.oauth.outbound_transport.v1",
+      "platform": "openai",
+      "account_type": "oauth"
+    }
+  ],
+  "runtimes": {},
+  "ui": { "entrypoint": "ui/index.html" },
+  "files": {}
+}

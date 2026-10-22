@@ -1,0 +1,18 @@
+# Local runtime state, credentials, logs, backups and generated binaries
+local-runtime/
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.local
+**/*.env
+!.env.example
+sub2api/backend/data/
+sub2api/backend/internal/web/dist/
+siwc-transport-plugin/build/keys/*.private
+oauth-tool/siwc-state.json
+
+# Generated local build output
+sub2api/frontend/dist/
+sub2api/backend/bin/
+sub2api/backend/server

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIWC OpenAI Transport</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 16px;
+    background: transparent; color: inherit;
+  }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p.sub { font-size: 12px; opacity: .7; margin: 0 0 14px; }
+  section { border: 1px solid rgba(128,128,128,.35); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  label { display: block; font-size: 12px; margin: 10px 0 4px; }
+  input[type=text], input[type=url] {
+    width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13px;
+    border: 1px solid rgba(128,128,128,.5); border-radius: 6px; background: transparent; color: inherit;
+  }
+  .checks label { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button {
+    padding: 6px 14px; font-size: 13px; border-radius: 6px; cursor: pointer;
+    border: 1px solid rgba(128,128,128,.5); background: transparent; color: inherit;
+  }
+  button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+  #status { font-size: 12px; margin-top: 10px; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: #16a34a; } .err { color: #dc2626; } .dim { opacity: .65; }
+</style>
+</head>
+<body>
+<h1>SIWC OpenAI Transport</h1>
+<p class="sub">SIWC（Sign in with ChatGPT）token-sharing 渠道：SIWC 账号的上游请求改写为 api.openai.com/v1/responses 直连路由（store=false、stream=true），�?SIWC 账号透明转发�?/p>
+
+<section>
+  <h2 style="font-size:13px;margin:0 0 6px">直连路由</h2>
+  <label for="direct_base_url">direct_base_url（默�?https://api.openai.com�?/label>
+  <input type="url" id="direct_base_url" placeholder="https://api.openai.com">
+  <label for="user_agent">user_agent</label>
+  <input type="text" id="user_agent" placeholder="sub2api-siwc-transport/0.1.1">
+  <div class="checks">
+    <label><input type="checkbox" id="force_store_false" checked> force_store_false（store=false，SIWC 必需�?/label>
+    <label><input type="checkbox" id="force_stream" checked> force_stream（stream=true，SIWC 必需�?/label>
+    <label><input type="checkbox" id="rewrite_chatgpt_codex_urls" checked> rewrite_chatgpt_codex_urls（chatgpt.com/backend-api/codex �?直连 /v1�?/label>
+  </div>
+</section>
+
+<div class="row">
+  <button class="primary" id="save">保存配置</button>
+  <button id="test">测试</button>
+  <button id="refresh">刷新状�?/button>
+</div>
+<div id="status" class="dim">正在加载�?/div>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
