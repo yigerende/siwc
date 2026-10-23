@@ -31,6 +31,20 @@ func RegisterAdminRoutes(
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
+	siwc := h.Admin.Account.NewSIWCMonitorHandler(settingService)
+	quality := admin.Group("/account-quality")
+	quality.GET("/capabilities", siwc.Capabilities)
+	quality.GET("/settings", siwc.Settings)
+	quality.GET("/progress", siwc.Progress)
+	quality.PUT("/settings", siwc.Save)
+	quality.POST("/results", siwc.Results)
+	quality.GET("/accounts/:id", siwc.Results)
+	quality.GET("/accounts/:id/history", siwc.History)
+	quality.POST("/run", siwc.Run)
+	quality.POST("/run-selected", siwc.Run)
+	admin.POST("/siwc/usage", siwc.BatchUsage)
+	admin.GET("/siwc/accounts/:id/usage", siwc.Usage)
+	admin.POST("/siwc/accounts/:id/usage", siwc.Usage)
 	{
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)

@@ -17,6 +17,7 @@
             @create="showCreate = true"
           >
             <template #after>
+              <SIWCQualitySettings/>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -325,7 +326,9 @@
               @account-updated="handleAccountUpdated"
               @usage-loaded="handleAccountUsageLoaded(row.id, $event)"
             />
+            <SIWCUsageCell :account="row"/>
           </template>
+          <template #cell-siwc_quality="{row}"><SIWCQualityCell :account="row"/></template>
           <template #cell-proxy="{ row }">
             <div class="flex flex-col gap-1">
               <div v-if="row.proxy" class="flex items-center gap-2">
@@ -520,6 +523,9 @@ import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
+import SIWCUsageCell from '@/components/account/SIWCUsageCell.vue'
+import SIWCQualityCell from '@/components/account/SIWCQualityCell.vue'
+import SIWCQualitySettings from '@/components/account/SIWCQualitySettings.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
@@ -1799,6 +1805,7 @@ const allColumns = computed(() => {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
   }
   c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
+  c.push({key:'siwc_quality',label:'智商情况',sortable:false})
   c.push(
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },

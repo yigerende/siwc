@@ -715,8 +715,34 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	}
 
 	applyExtraToUsage(usage, account.Extra, now)
+	if account.IsOpenAISIWC() {
+		// SIWC percentages have a dedicated source. Keep the ordinary local
+		// dollar windows, but never probe Codex with a ChatPass credential.
+		usage.FiveHour, usage.SevenDay = nil, nil
+		var snapshot SIWCUsageSnapshot
+		decodeSIWCExtra(account, siwcUsageKey, &snapshot)
+		appID := account.GetCredential("siwc_app_id")
+		if appID == "" {
+			appID = account.GetOpenAISIWCClientID()
+		}
+		if snapshot.Error == "" && snapshot.RateLimit != nil && !snapshot.CheckedAt.IsZero() && (appID == "" || snapshot.AppID == appID) {
+			usage.UpdatedAt = &snapshot.CheckedAt
+			for i, window := range []*OpenAIRateLimitWindow{snapshot.RateLimit.PrimaryWindow, snapshot.RateLimit.SecondaryWindow} {
+				if window == nil {
+					continue
+				}
+				reset := time.Unix(window.ResetAt, 0)
+				progress := &UsageProgress{Utilization: window.UsedPercent, ResetsAt: &reset}
+				if i == 0 {
+					usage.FiveHour = progress
+				} else {
+					usage.SevenDay = progress
+				}
+			}
+		}
+	}
 
-	if (force || shouldRefreshOpenAICodexSnapshot(account, usage, now)) && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
+	if !account.IsOpenAISIWC() && (force || shouldRefreshOpenAICodexSnapshot(account, usage, now)) && s.shouldProbeOpenAICodexSnapshot(account.ID, now, force) {
 		if account.IsShadow() {
 			// Spark shadow accounts fetch usage from /wham/usage (bengalfox channel)
 			// via the shared OpenAIQuotaService, which resolves credentials from the

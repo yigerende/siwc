@@ -149,7 +149,7 @@
           refresh button is rendered via the pre-actions slot so the user sees a
           single row of related buttons instead of two stacked rows.
         -->
-        <OpenAIQuotaResetCell :account="account" @account-updated="handleQuotaResetAccountUpdated">
+        <OpenAIQuotaResetCell v-if="account.credentials?.auth_mode !== 'siwc'" :account="account" @account-updated="handleQuotaResetAccountUpdated">
           <template #pre-actions>
             <button
               type="button"
@@ -192,6 +192,7 @@
         <div class="text-xs text-gray-400">-</div>
         <!-- Always allow on-demand upstream quota query, even before local data exists. -->
         <OpenAIQuotaResetCell
+          v-if="account.credentials?.auth_mode !== 'siwc'"
           :account="account"
           class="mt-1"
           @account-updated="handleQuotaResetAccountUpdated"
