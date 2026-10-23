@@ -3,10 +3,45 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+type siwcUsageCacheRepo struct {
+	AccountRepository
+	a *Account
+}
+
+func (r *siwcUsageCacheRepo) GetByID(context.Context, int64) (*Account, error) { return r.a, nil }
+func (r *siwcUsageCacheRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	for k, v := range updates {
+		r.a.Extra[k] = v
+	}
+	return nil
+}
+
+func TestSIWCFirstUsageFailureRespectsRetryInterval(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	repo := &siwcUsageCacheRepo{a: &Account{ID: 7, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": "siwc", "siwc_app_id": "app", "siwc_web_access_token": "test"}, Extra: map[string]any{}}}
+	m := NewSIWCMonitor(&AccountTestService{accountRepo: repo}, nil)
+	m.usageURL = server.URL
+	first, err := m.Usage(context.Background(), 7, false)
+	if err != nil || first.Error == "" {
+		t.Fatal("expected retained upstream failure", err)
+	}
+	second, err := m.Usage(context.Background(), 7, false)
+	if err != nil || calls != 1 || !first.AttemptedAt.Equal(second.AttemptedAt) || second.AppID != "app" {
+		t.Fatalf("failed initial usage must remain cached: calls=%d err=%v", calls, err)
+	}
+}
 
 func TestSIWCUsageWindowsAndAmbiguousData(t *testing.T) {
 	now := time.Now()

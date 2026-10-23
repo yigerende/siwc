@@ -453,7 +453,7 @@ func (m *SIWCMonitor) Usage(ctx context.Context, id int64, force bool, ages ...i
 		appID = a.GetOpenAISIWCClientID()
 	}
 	if appID != "" && old.AppID != appID {
-		old = SIWCUsageSnapshot{AccountID: id}
+		old = SIWCUsageSnapshot{AccountID: id, AppID: appID}
 	}
 	age := 120
 	if len(ages) > 0 {
