@@ -329,7 +329,6 @@
               @account-updated="handleAccountUpdated"
               @usage-loaded="handleAccountUsageLoaded(row.id, $event)"
             />
-            <SIWCUsageCell :account="row"/>
           </template>
           <template #cell-siwc_quality="{row}"><SIWCQualityCell :account="row"/></template>
           <template #cell-proxy="{ row }">
@@ -526,7 +525,6 @@ import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
-import SIWCUsageCell from '@/components/account/SIWCUsageCell.vue'
 import SIWCQualityCell from '@/components/account/SIWCQualityCell.vue'
 import SIWCQualitySettings from '@/components/account/SIWCQualitySettings.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'

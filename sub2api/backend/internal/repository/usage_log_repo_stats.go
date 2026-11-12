@@ -306,6 +306,15 @@ func (r *usageLogRepository) GetAccountTodayStats(ctx context.Context, accountID
 
 // GetAccountWindowStats 获取账号时间窗口内的统计
 func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountID int64, startTime time.Time) (*usagestats.AccountStats, error) {
+	return r.getAccountWindowStats(ctx, accountID, startTime, nil)
+}
+
+// GetAccountWindowStatsRange aligns local costs with a successful quota snapshot.
+func (r *usageLogRepository) GetAccountWindowStatsRange(ctx context.Context, accountID int64, startTime, endTime time.Time) (*usagestats.AccountStats, error) {
+	return r.getAccountWindowStats(ctx, accountID, startTime, &endTime)
+}
+
+func (r *usageLogRepository) getAccountWindowStats(ctx context.Context, accountID int64, startTime time.Time, endTime *time.Time) (*usagestats.AccountStats, error) {
 	query := `
 		SELECT
 			COUNT(*) as requests,
@@ -317,12 +326,17 @@ func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountI
 		WHERE account_id = $1 AND created_at >= $2
 	`
 
+	args := []any{accountID, startTime}
+	if endTime != nil {
+		query += " AND created_at < $3"
+		args = append(args, *endTime)
+	}
 	stats := &usagestats.AccountStats{}
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
 		query,
-		[]any{accountID, startTime},
+		args,
 		&stats.Requests,
 		&stats.Tokens,
 		&stats.Cost,

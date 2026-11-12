@@ -3,9 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
 import type { Account } from '@/types'
 
-const { getUsage } = vi.hoisted(() => ({
+const { getUsage, post } = vi.hoisted(() => ({
+  post: vi.fn(),
   getUsage: vi.fn()
 }))
+
+vi.mock('@/api/client', () => ({ apiClient: { post } }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
@@ -1901,4 +1904,26 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).not.toContain('7d S')
     expect(wrapper.text()).not.toContain('7d F')
   })
+})
+
+
+describe('SIWC usage refresh routing', () => {
+ it('uses the SIWC endpoint then invalidates the existing page batch', async () => {
+  const requestBatch=vi.fn();post.mockResolvedValue({data:{}})
+  const account=makeAccount({id:918,platform:'openai',credentials:{auth_mode:'siwc'}})
+  const w=mount(AccountUsageCell,{props:{account,requestBatchedUsage:requestBatch},global:{stubs:{SIWCUsageCell:{template:'<button @click="$emit(\'refresh\')">refresh</button>'}}}})
+  await w.get('button').trigger('click');await flushPromises()
+  expect(post).toHaveBeenCalledWith('/admin/siwc/accounts/918/usage')
+  expect(requestBatch).toHaveBeenLastCalledWith(account,{force:true});w.unmount()
+ })
+ it('does not reload another account after a late refresh response',async()=>{
+  let resolve!: (value:unknown)=>void
+  post.mockReturnValue(new Promise(r=>{resolve=r}))
+  const requestBatch=vi.fn()
+  const w=mount(AccountUsageCell,{props:{account:makeAccount({id:919,platform:'openai',credentials:{auth_mode:'siwc'}}),requestBatchedUsage:requestBatch},global:{stubs:{SIWCUsageCell:{template:'<button @click="$emit(\'refresh\')">refresh</button>'}}}})
+  await w.get('button').trigger('click')
+  await w.setProps({account:makeAccount({id:920,platform:'openai',credentials:{auth_mode:'siwc'}})})
+  requestBatch.mockClear();resolve({data:{}});await flushPromises()
+  expect(requestBatch).not.toHaveBeenCalled();w.unmount()
+ })
 })
