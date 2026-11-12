@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -44,6 +45,7 @@ func startPluginRuntime(ctx context.Context, installation *PluginInstallation, s
 		return nil, errors.New("插件二进制哈希无效")
 	}
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), installation.BinaryPath)
+	cmd.Env = pluginRuntimeMemoryEnv()
 	client := hcplugin.NewClient(&hcplugin.ClientConfig{
 		HandshakeConfig:  pluginv1.HandshakeConfig,
 		Plugins:          pluginv1.ClientPluginMap(),
@@ -106,6 +108,15 @@ func startPluginRuntime(ctx context.Context, installation *PluginInstallation, s
 	// 老插件不实现 InitHostServices（返回 Unimplemented），此处静默跳过，绝不阻断启动。
 	offerPluginHostServices(ctx, installation, api, transportClient.Broker, hostServices, startTimeout)
 	return runtime, nil
+}
+
+// Plugins keep an isolated environment, but share the host's container memory.
+// Pass only the explicit Go memory budget; never inherit host credentials.
+func pluginRuntimeMemoryEnv() []string {
+	if limit := os.Getenv("GOMEMLIMIT"); limit != "" {
+		return []string{"GOMEMLIMIT=" + limit}
+	}
+	return nil
 }
 
 // offerPluginHostServices 在 go-plugin broker 上启动一个宿主服务实例，并通过

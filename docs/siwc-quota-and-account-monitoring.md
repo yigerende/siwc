@@ -11,3 +11,5 @@ Space 在额度步骤重新网页登录并更新原账号两个网页凭证字�
 单账号POST /admin/accounts/{id}/test兼容自定义prompt与reasoning_effort；test_start携带custom_prompt和实际effort，完整结束返回test_complete。SIWC账号按绑定代理经过原SIWC插件通道；代理缺失或插件未就绪失败，不回退普通OAuth；复用SIWC token provider续期能力。未修改Space现有质量判定和SIWC自动质量监控规则。
 
 验证：服务/管理接口/Redis/请求去重/WS流内计数测试、前端组件和翻页取消测试、类型检查及构建通过。正式不做并发推理压测。
+
+发布前发现旧版本宿主与传输插件共用2GiB容器，在实际请求中同时占用约1GiB并反复触发cgroup OOM。SIWC镜像为每个Go进程设置640MiB软内存预算，插件仅接收GOMEMLIMIT，不继承宿主密钥、数据库或代理环境变量。该预算促使GC提前回收，不是硬限制；活跃工作集超过预算时仍需进一步排查。保留原容器资源上限和业务并发配置。
