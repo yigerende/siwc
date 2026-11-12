@@ -487,6 +487,8 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 			siwc.POST("/generate-auth-url", h.Admin.OpenAIOAuth.GenerateSIWCAuthURL)
 			siwc.POST("/exchange-code", h.Admin.OpenAIOAuth.ExchangeSIWCCode)
 			siwc.POST("/create-from-oauth", h.Admin.OpenAIOAuth.CreateAccountFromSIWC)
+			siwc.POST("/integration/generate-auth-url", h.Admin.OpenAIOAuth.GenerateSIWCIntegration)
+			siwc.POST("/integration/callback", h.Admin.OpenAIOAuth.ImportSIWCIntegration)
 			remote := adminhandler.NewSIWCRemoteHandler()
 			siwc.POST("/remote/connect", remote.Connect)
 			siwc.POST("/remote/:target/generate", remote.Generate)

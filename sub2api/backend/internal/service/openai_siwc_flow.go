@@ -36,6 +36,8 @@ const siwcFlowMarker = "siwc"
 // SIWCAuthURLInput 生成 SIWC 授权 URL 的输入。
 type SIWCAuthURLInput struct {
 	ProxyID *int64
+	// Transient proxy for an authenticated integration; retained only in the OAuth session.
+	ProxyURL string
 	// RedirectURI 必须是 http://127.0.0.1:<port>/auth/callback 形式的
 	// loopback 回调（端口可变、路径固定；不要用 localhost）。为空时使用默认值。
 	RedirectURI string
@@ -85,6 +87,13 @@ func (s *OpenAIOAuthService) GenerateSIWCAuthURL(ctx context.Context, input *SIW
 	}
 
 	proxyURL := ""
+	if input.ProxyURL != "" {
+		proxy, parseErr := url.Parse(input.ProxyURL)
+		if parseErr != nil || proxy.Hostname() == "" || proxy.Port() == "" || (proxy.Scheme != "http" && proxy.Scheme != "https" && proxy.Scheme != "socks5" && proxy.Scheme != "socks5h") || proxy.RawQuery != "" || proxy.Fragment != "" || (proxy.Path != "" && proxy.Path != "/") || input.ProxyID != nil {
+			return nil, infraerrors.BadRequest("OPENAI_SIWC_INVALID_PROXY", "invalid integration proxy")
+		}
+		proxyURL = input.ProxyURL
+	}
 	if input.ProxyID != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
 		if err != nil {
