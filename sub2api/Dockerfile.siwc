@@ -37,9 +37,6 @@ RUN CGO_ENABLED=0 go build -p 2 -tags=embed -trimpath \
 FROM postgres:18-alpine AS pg-client
 
 FROM alpine:3.21
-# Host and transport plugin share the production container's 2 GiB limit.
-# This per-process soft GC budget leaves room for native allocations and buffers.
-ENV GOMEMLIMIT=640MiB
 LABEL org.opencontainers.image.title="sub2api-siwc"
 RUN apk add --no-cache \
     ca-certificates tzdata curl su-exec libpq zstd-libs lz4-libs \
