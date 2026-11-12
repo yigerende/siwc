@@ -117,6 +117,7 @@ export default {
         status: '状态',
         schedulable: '调度',
         todayStats: '今日统计',
+        recentRequests: '最近请求',
         groups: '分组',
         usageWindows: '用量窗口',
         proxy: '代理',
@@ -124,6 +125,14 @@ export default {
         createdAt: '创建时间',
         expiresAt: '过期时间',
         actions: '操作'
+      },
+      recentRequests: {
+        success: '成功',
+        failed: '失败',
+        empty: '无记录',
+        error: '错误',
+        unavailable: '读取失败',
+        recovered: '重试后成功'
       },
       schedulerScore: {
         baseShort: '普通',
@@ -230,6 +239,7 @@ export default {
       subscriptionExpires: '到期',
       // 容量状态提示
       capacity: {
+        requestRpm: '最近60秒开始转发的用户请求数，含进行中和失败请求；同账号重试去重，不含后台采集和检测',
         windowCost: {
           blocked: '5h窗口费用超限，账号暂停调度',
           stickyOnly: '5h窗口费用达阈值，仅允许粘性会话',

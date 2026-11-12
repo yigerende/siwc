@@ -229,7 +229,8 @@ const (
 
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
-	cache ConcurrencyCache
+	requestRPM *accountRequestRPM
+	cache      ConcurrencyCache
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -249,6 +250,9 @@ func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
 		accountLoadCache: make(map[string]cachedAccountLoadBatch),
 	}
 	svc.SetAccountLoadBatchCacheTTL(defaultAccountLoadBatchCacheTTL)
+	if rpmCache, ok := cache.(AccountRequestRPMCache); ok {
+		svc.requestRPM = newAccountRequestRPM(rpmCache)
+	}
 	return svc
 }
 

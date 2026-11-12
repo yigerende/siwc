@@ -25,9 +25,14 @@ type openAIWSPassthroughHandlerHarness struct {
 	moderationRepo *contentModerationHandlerTestRepo
 	gatewayCache   service.GatewayCache
 	apiKey         *service.APIKey
+	requestStarts  chan int64
 }
 
 func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, settings ...map[string]string) *openAIWSPassthroughHandlerHarness {
+	return newOpenAIWSPassthroughHandlerHarnessMode(t, upstreamURL, service.OpenAIWSIngressModePassthrough, settings...)
+}
+
+func newOpenAIWSPassthroughHandlerHarnessMode(t *testing.T, upstreamURL, mode string, settings ...map[string]string) *openAIWSPassthroughHandlerHarness {
 	t.Helper()
 	gatewayCache := testutil.NewRedisGatewayCache(t)
 
@@ -57,7 +62,7 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 		Credentials: map[string]any{"api_key": "sk-test", "base_url": upstreamURL},
 		Extra: map[string]any{
 			"openai_apikey_responses_websockets_v2_enabled": true,
-			"openai_apikey_responses_websockets_v2_mode":    service.OpenAIWSIngressModePassthrough,
+			"openai_apikey_responses_websockets_v2_mode":    mode,
 		},
 	}
 	cfg := &config.Config{}
@@ -103,6 +108,7 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 		User:    &service.User{ID: 1751, Status: service.StatusActive},
 	}
 	handlerDone := make(chan struct{})
+	requestStarts := make(chan int64, 32)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
@@ -110,6 +116,7 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 		c.Next()
 	})
 	router.GET("/openai/v1/responses", func(c *gin.Context) {
+		c.Set(accountRequestRPMContextKey, &accountRequestRPMTracker{record: func(id int64) { requestStarts <- id }})
 		h.ResponsesWebSocket(c)
 		close(handlerDone)
 	})
@@ -126,6 +133,7 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 		handler:        h,
 		clientConn:     clientConn,
 		handlerDone:    handlerDone,
+		requestStarts:  requestStarts,
 		moderationRepo: moderationRepo,
 		gatewayCache:   gatewayCache,
 		apiKey:         apiKey,

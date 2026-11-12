@@ -1273,6 +1273,7 @@ export interface Account {
   proxy_fallback_origin_name?: string | null
   concurrency: number
   load_factor?: number | null
+  request_rpm?: number | null // Business requests started in the last 60 seconds
   current_concurrency?: number // Real-time concurrency count from Redis
   scheduler_score?: {
     base_score: number

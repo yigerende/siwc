@@ -171,3 +171,15 @@ func TestPluginManagerStatusReportsNotRunningWithoutRuntime(t *testing.T) {
 	assert.Equal(t, "插件未运行", resp.Message)
 	assert.Empty(t, resp.StatusJson)
 }
+
+func TestSIWCAccountTestNeverFallsBackToOrdinaryOAuth(t *testing.T) {
+	for _, manager := range []*PluginManager{nil, {}} {
+		upstream := &pluginRoutingHTTPUpstream{}
+		svc := &AccountTestService{httpUpstream: upstream, pluginManager: manager}
+		request, _ := http.NewRequest("POST", "https://chatgpt.com/backend-api/codex/responses", strings.NewReader(`{}`))
+		_, err := svc.doOpenAIAccountTestUpstream(request, "", &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": "siwc"}}, true)
+		require.Error(t, err)
+		require.Zero(t, upstream.doCalls)
+		require.Zero(t, upstream.doWithTLSCalls)
+	}
+}

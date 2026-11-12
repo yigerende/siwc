@@ -484,7 +484,7 @@ func (m *SIWCMonitor) fetchUsage(ctx context.Context, a *Account) (SIWCUsageSnap
 	out := SIWCUsageSnapshot{AccountID: a.ID}
 	token := a.GetCredential("siwc_web_access_token")
 	if token == "" {
-		return out, errors.New("缺少网页登录凭证，请重新获取 SIWC 授权并同步凭证")
+		return out, errors.New("缺少网页登录凭证，请重新网页登录并同步网页 AT")
 	}
 	c := req.C().ImpersonateChrome().SetTimeout(20 * time.Second)
 	if a.Proxy != nil {
@@ -555,8 +555,8 @@ func parseSIWCUsage(raw []byte, id int64, appID string, now time.Time) (SIWCUsag
 			}
 		}
 	}
-	if matches != 1 || out.RateLimit == nil || out.RateLimit.PrimaryWindow == nil || out.RateLimit.SecondaryWindow == nil {
-		return out, errors.New("未找到唯一的 sub2api 应用及完整 5h/7d 窗口")
+	if matches != 1 || out.RateLimit == nil || (out.RateLimit.PrimaryWindow == nil && out.RateLimit.SecondaryWindow == nil) {
+		return out, errors.New("未找到唯一的 sub2api 应用及有效额度窗口")
 	}
 	return out, nil
 }

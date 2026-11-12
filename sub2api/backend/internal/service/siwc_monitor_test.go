@@ -141,3 +141,21 @@ func TestSIWCQualityConsecutiveVerdicts(t *testing.T) {
 		t.Fatal("recovery streak did not clear degradation")
 	}
 }
+
+func TestSIWCUsageSingleWindow(t *testing.T) {
+	for _, seconds := range []int64{18000, 604800} {
+		raw, _ := json.Marshal(map[string]any{"items": []any{map[string]any{"id": "app", "name": "sub2api", "windows": []any{map[string]any{"limit_window_seconds": seconds, "used_percent": 17, "reset_at": 1795087944}}}}})
+		out, err := parseSIWCUsage(raw, 6, "app", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (out.RateLimit.PrimaryWindow != nil) != (seconds == 18000) || (out.RateLimit.SecondaryWindow != nil) != (seconds == 604800) {
+			t.Fatal("missing window fabricated", out)
+		}
+	}
+	for _, raw := range []string{`{"items":[{"id":"app","windows":[]}]}`, `{"items":[{"id":"app","windows":[{"limit_window_seconds":3600,"used_percent":0,"reset_at":1795087944}]}]}`} {
+		if _, err := parseSIWCUsage([]byte(raw), 6, "app", time.Now()); err == nil {
+			t.Fatal("accepted no supported windows")
+		}
+	}
+}

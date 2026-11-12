@@ -453,6 +453,7 @@ func provideCleanup(
 		}
 
 		parallelSteps := []cleanupStep{
+			{"AccountRequestRPM", func() error { concurrencyService.StopRequestRPMWorker(); return nil }},
 			{"PluginManager", func() error {
 				if pluginManager != nil {
 					pluginManager.Stop()

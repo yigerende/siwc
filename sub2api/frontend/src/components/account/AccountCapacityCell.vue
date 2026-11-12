@@ -7,6 +7,12 @@
       </svg>
     </CapacityBadge>
 
+    <span
+      class="whitespace-nowrap font-mono text-[11px] leading-4 tabular-nums text-gray-500 dark:text-gray-400"
+      :title="t('admin.accounts.capacity.requestRpm')"
+      data-testid="account-request-rpm"
+    >RPM: {{ account.request_rpm ?? '--' }}</span>
+
     <!-- 5h窗口费用限制 -->
     <CapacityBadge v-if="showWindowCost" :color-class="windowCostClass" :tooltip="windowCostTooltip" :current="'$' + formatCost(currentWindowCost)" :max="'$' + formatCost(account.window_cost_limit)">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

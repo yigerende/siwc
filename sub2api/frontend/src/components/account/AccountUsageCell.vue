@@ -123,7 +123,7 @@
     </template>
 
     <!-- OpenAI OAuth accounts: single source from /usage API -->
-    <template v-else-if="account.platform === 'openai' && account.type === 'oauth'">
+    <template v-else-if="account.platform === 'openai' && account.type === 'oauth' && account.credentials?.auth_mode !== 'siwc'">
       <div v-if="hasOpenAIUsageFallback" class="space-y-1">
         <UsageProgressBar
           v-if="usageInfo?.five_hour"

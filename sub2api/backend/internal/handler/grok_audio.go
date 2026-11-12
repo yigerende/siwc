@@ -287,6 +287,9 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		}
 		result, forwardErr := func() (*service.OpenAIForwardResult, error) {
 			defer release()
+			if endpoint == "tts" || endpoint == "stt" {
+				h.concurrencyHelper.TrackAccountRequest(c, account.ID)
+			}
 			return h.gatewayService.ForwardGrokVoice(c.Request.Context(), c, account, endpoint, body, contentType)
 		}()
 		if forwardErr == nil {

@@ -1131,7 +1131,28 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
   return data
 }
 
+export interface AccountRecentRequest {
+  created_at: string
+  failed: boolean
+  status_code?: number
+  error_message?: string
+}
+
+export interface AccountRecentRequests {
+  account_id: number
+  requests: AccountRecentRequest[]
+}
+
+export async function getRecentRequests(accountIds: number[], signal?: AbortSignal): Promise<{ accounts: AccountRecentRequests[] }> {
+  const { data } = await apiClient.post<{ accounts: AccountRecentRequests[] }>('/admin/usage/account-recent-requests', {
+    account_ids: accountIds
+  }, { signal, timeout: 10000 })
+  return data
+}
+
+
 export const accountsAPI = {
+ getRecentRequests,
   list,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,

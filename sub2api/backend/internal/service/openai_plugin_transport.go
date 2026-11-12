@@ -1,6 +1,9 @@
 package service
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+)
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 	s.pluginManager = manager
@@ -31,6 +34,9 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		if handled {
 			return response, err
 		}
+	}
+	if account.IsOpenAISIWC() {
+		return nil, errors.New("SIWC 复核线路未启用，禁止回落普通 OAuth")
 	}
 	if useTLSFallback {
 		return s.httpUpstream.DoWithTLS(

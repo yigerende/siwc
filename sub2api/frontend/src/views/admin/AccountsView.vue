@@ -304,7 +304,10 @@
               :error="todayStatsError"
             />
           </template>
-          <template #cell-groups="{ row }">
+          <template #cell-recent_requests="{ row }">
+ <AccountRecentRequestsCell :requests="recentRequestsByAccountID[String(row.id)]" :loading="recentRequestsLoading" :error="recentRequestsError" />
+ </template>
+ <template #cell-groups="{ row }">
             <AccountGroupsCell :groups="accountGroupsForRow(row)" :max-display="4" />
           </template>
           <template #header-usage="{ column }">
@@ -528,6 +531,8 @@ import SIWCQualityCell from '@/components/account/SIWCQualityCell.vue'
 import SIWCQualitySettings from '@/components/account/SIWCQualitySettings.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
+import AccountRecentRequestsCell from '@/components/account/AccountRecentRequestsCell.vue'
+import { useAccountRecentRequests } from '@/composables/useAccountRecentRequests'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
@@ -874,7 +879,8 @@ const queueBatchedUsage = (account: Account, options?: { force?: boolean }) => {
   }, 0)
 }
 
-const refreshTodayStatsBatch = async () => {
+const refreshTodayStatsBatch = () => Promise.all([refreshTodayStatsOnly(), refreshRecentRequests()])
+const refreshTodayStatsOnly = async () => {
   // Why this checks both columns:
   // - today_stats column shows dedicated today's metrics.
   // - usage column also embeds today's stats for Key/Bedrock rows.
@@ -1055,6 +1061,7 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
+ if (key === 'recent_requests' && wasHidden) void refreshRecentRequests()
   if ((key === 'today_stats' || key === 'usage') && wasHidden) {
     refreshTodayStatsBatch().catch((error) => {
       console.error('Failed to load account today stats after showing column:', error)
@@ -1102,6 +1109,17 @@ const {
     sort_order: sortState.sort_order
   }
 })
+
+const {
+  requests: recentRequestsByAccountID,
+  loading: recentRequestsLoading,
+  error: recentRequestsError,
+  refresh: refreshRecentRequests
+} = useAccountRecentRequests(
+  computed(() => accounts.value.map(account => account.id)),
+  computed(() => !hiddenColumns.has('recent_requests')),
+  (ids, signal) => adminAPI.accounts.getRecentRequests(ids, signal)
+)
 
 const {
   selectedSet,
@@ -1804,6 +1822,7 @@ const allColumns = computed(() => {
   if (!authStore.isSimpleMode) {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
   }
+  c.push({ key: 'recent_requests', label: t('admin.accounts.columns.recentRequests'), sortable: false })
   c.push({ key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false })
   c.push({key:'siwc_quality',label:'智商情况',sortable:false})
   c.push(
