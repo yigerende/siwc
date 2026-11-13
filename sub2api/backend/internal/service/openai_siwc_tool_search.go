@@ -17,6 +17,7 @@ import (
 )
 
 type siwcToolSearchRetryKey struct{}
+type siwcToolSearchResponseKey struct{}
 
 const siwcToolSearchBudgetKey = "siwc_tool_search_retry_budget"
 
@@ -158,9 +159,19 @@ func (s *OpenAIGatewayService) doSIWCToolSearchRetry(request *http.Request, acco
 		}
 		retried.Body = newSIWCToolSearchBody(&siwcReplayBody{Reader: reader, Closer: retried.Body}, stream)
 		retried.ContentLength = -1
+		retried.Request = next.WithContext(context.WithValue(next.Context(), siwcToolSearchResponseKey{}, true))
 		slog.InfoContext(request.Context(), "siwc_tool_search_compat_retry_accepted", "account_id", account.ID)
 	}
 	return retried, retryErr
+}
+
+// Only an actually adapted response may override the copied upstream MIME
+// after the existing non-stream handler has extracted its final JSON payload.
+// All ordinary/off/non-matching responses retain their existing header behavior.
+func setSIWCToolSearchJSONContentType(c *gin.Context, response *http.Response) {
+	if c != nil && response != nil && response.Request != nil && response.Request.Context().Value(siwcToolSearchResponseKey{}) == true {
+		c.Header("Content-Type", "application/json; charset=utf-8")
+	}
 }
 
 // Pull-based streaming transformation: no background writer, no full-response

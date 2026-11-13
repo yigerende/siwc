@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -133,6 +134,48 @@ func TestSIWCToolSearchRetryPluginHeaderCasing(t *testing.T) {
 				require.True(t, isEventStreamResponse(response.Header), "downstream JSON/SSE handlers must recognize the stream")
 				require.NotContains(t, response.Header, "content-length")
 				require.Equal(t, int64(-1), response.ContentLength)
+			})
+		}
+	}
+}
+
+func TestSIWCToolSearchNonStreamingPipeline(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, adapted := range []bool{false, true} {
+			t.Run(fmt.Sprintf("passthrough=%t/adapted=%t", passthrough, adapted), func(t *testing.T) {
+				settings := newPanelRateLimitTestService(&panelRateLimitSettingRepo{})
+				require.NoError(t, settings.SetSIWCToolSearchCompatibility(context.Background(), true))
+				s := &OpenAIGatewayService{settingService: settings, cfg: &config.Config{}}
+				req, _, account := toolSearchTestRequest(t, strings.Replace(toolSearchTestBody, `"stream":true`, `"stream":false`, 1))
+				calls := 0
+				resp, err := s.doSIWCToolSearchRetry(req, account, func(*http.Request) (*http.Response, error) {
+					calls++
+					if calls == 1 {
+						return toolSearchResponse(400, toolSearchRejected), nil
+					}
+					return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(
+						`data: {"type":"response.completed","sequence_number":0,"response":{"id":"r","object":"response","model":"gpt-6.1-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"NONSTREAM_OK"}]}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}}` + "\n\n"))}, nil
+				})
+				require.NoError(t, err)
+				if !adapted {
+					resp.Request = resp.Request.WithContext(context.Background())
+				}
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+				if passthrough {
+					_, err = s.handleNonStreamingResponsePassthrough(c.Request.Context(), resp, c, account, "gpt-6.1-sol", "gpt-6.1-sol")
+				} else {
+					_, err = s.handleNonStreamingResponse(c.Request.Context(), resp, c, account, "gpt-6.1-sol", "gpt-6.1-sol")
+				}
+				require.NoError(t, err)
+				require.Equal(t, "NONSTREAM_OK", gjson.Get(rec.Body.String(), "output.0.content.0.text").String())
+				require.Equal(t, int64(15), gjson.Get(rec.Body.String(), "usage.total_tokens").Int())
+				if adapted {
+					require.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+				} else {
+					require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"), "unmarked original response behavior remains unchanged")
+				}
 			})
 		}
 	}
