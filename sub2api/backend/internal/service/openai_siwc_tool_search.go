@@ -131,10 +131,23 @@ func (s *OpenAIGatewayService) doSIWCToolSearchRetry(request *http.Request, acco
 	slog.InfoContext(request.Context(), "siwc_tool_search_compat_retry", "account_id", account.ID, "attempt", 1)
 	retried, retryErr := roundTrip(next)
 	if retryErr == nil && retried != nil && retried.StatusCode >= 200 && retried.StatusCode < 300 && retried.Body != nil {
-		stream := strings.Contains(strings.ToLower(retried.Header.Get("Content-Type")), "text/event-stream")
+		// Plugin RPC preserves wire header casing (HTTP/2 uses lowercase).
+		// Normalize only this adapted response so both the restorer and existing
+		// downstream SSE/JSON handlers recognize it, including non-stream clients.
+		headers := make(http.Header, len(retried.Header))
+		for name, values := range retried.Header {
+			if strings.EqualFold(name, "Content-Length") {
+				continue
+			}
+			if strings.EqualFold(name, "Content-Type") {
+				name = "Content-Type"
+			}
+			headers[name] = append(headers[name], values...)
+		}
+		retried.Header = headers
+		stream := isEventStreamResponse(headers)
 		retried.Body = newSIWCToolSearchBody(retried.Body, stream)
 		retried.ContentLength = -1
-		retried.Header.Del("Content-Length")
 		slog.InfoContext(request.Context(), "siwc_tool_search_compat_retry_accepted", "account_id", account.ID)
 	}
 	return retried, retryErr

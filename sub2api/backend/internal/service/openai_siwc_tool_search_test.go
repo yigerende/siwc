@@ -97,6 +97,41 @@ func TestSIWCToolSearchRetrySuccessAndSharedBudget(t *testing.T) {
 	require.Equal(t, 1, extra, "account failover cannot reset budget")
 }
 
+func TestSIWCToolSearchRetryPluginHeaderCasing(t *testing.T) {
+	for _, headerName := range []string{"Content-Type", "content-type", "CONTENT-TYPE"} {
+		for _, streaming := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/stream=%t", headerName, streaming), func(t *testing.T) {
+				settings := newPanelRateLimitTestService(&panelRateLimitSettingRepo{})
+				require.NoError(t, settings.SetSIWCToolSearchCompatibility(context.Background(), true))
+				s := &OpenAIGatewayService{settingService: settings}
+				body := strings.Replace(toolSearchTestBody, `"stream":true`, fmt.Sprintf(`"stream":%t`, streaming), 1)
+				req, _, account := toolSearchTestRequest(t, body)
+				calls := 0
+				response, err := s.doSIWCToolSearchRetry(req, account, func(*http.Request) (*http.Response, error) {
+					calls++
+					if calls == 1 {
+						return toolSearchResponse(400, toolSearchRejected), nil
+					}
+					// Plugin RPC preserves HTTP/2 lowercase headers. SIWC also
+					// forces SSE upstream when the client requests non-stream JSON.
+					return &http.Response{StatusCode: 200,
+						Header: http.Header{headerName: {"text/event-stream; charset=utf-8"}, "content-length": {"999"}},
+						Body: io.NopCloser(strings.NewReader("event: response.completed\ndata: " +
+							`{"type":"response.completed","sequence_number":0,"response":{"status":"completed","output":[{"type":"function_call","id":"fc_next","call_id":"call_next","name":"tool_search","arguments":"{\"query\":\"next\"}"}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}}` + "\n\n"))}, nil
+				})
+				require.NoError(t, err)
+				require.Equal(t, 2, calls)
+				data, err := io.ReadAll(response.Body)
+				require.NoError(t, err, "SSE must not be decoded as an entire JSON document")
+				require.Contains(t, string(data), `"type":"tool_search_call"`)
+				require.True(t, isEventStreamResponse(response.Header), "downstream JSON/SSE handlers must recognize the stream")
+				require.NotContains(t, response.Header, "content-length")
+				require.Equal(t, int64(-1), response.ContentLength)
+			})
+		}
+	}
+}
+
 func TestSIWCToolSearchRetryGates(t *testing.T) {
 	for _, name := range []string{"off", "oauth_on", "oauth_off", "already_written", "canceled", "no_call", "output_only", "wrong_code", "tools_param", "429", "502", "transport_error", "stream_error", "malformed_error", "large_error", "second_attempt_fails", "proxy_name_collision"} {
 		t.Run(name, func(t *testing.T) {
