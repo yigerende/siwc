@@ -20,6 +20,7 @@
               <SIWCQualitySettings/>
               <SIWCConfigurationUpdateSwitch />
               <SIWCRemoteCompactionSwitch />
+              <SIWCToolSearchSwitch />
               <SpaceWorkflowCleanup />
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
@@ -535,6 +536,7 @@ import SIWCQualityCell from '@/components/account/SIWCQualityCell.vue'
 import SIWCQualitySettings from '@/components/account/SIWCQualitySettings.vue'
 import SIWCConfigurationUpdateSwitch from '@/components/account/SIWCConfigurationUpdateSwitch.vue'
 import SIWCRemoteCompactionSwitch from '@/components/account/SIWCRemoteCompactionSwitch.vue'
+import SIWCToolSearchSwitch from '@/components/account/SIWCToolSearchSwitch.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountRecentRequestsCell from '@/components/account/AccountRecentRequestsCell.vue'

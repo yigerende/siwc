@@ -15,6 +15,12 @@ export interface SIWCImport {
   name: string
 }
 export const siwcAPI = {
+  async toolSearch(): Promise<{ enabled: boolean }> {
+    return (await apiClient.get('/admin/siwc/tool-search')).data
+  },
+  async saveToolSearch(enabled: boolean): Promise<{ enabled: boolean }> {
+    return (await apiClient.put('/admin/siwc/tool-search', { enabled })).data
+  },
   async remoteCompaction(): Promise<{ enabled: boolean }> {
     return (await apiClient.get('/admin/siwc/remote-compaction')).data
   },

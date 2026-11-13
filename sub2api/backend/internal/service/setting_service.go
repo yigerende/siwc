@@ -144,6 +144,8 @@ type SettingService struct {
 	panelRateLimitCache atomic.Value
 	panelRateLimitSF    singleflight.Group
 
+	siwcToolSearchMu             sync.Mutex
+	siwcToolSearchCache          atomic.Pointer[cachedSIWCToolSearch]
 	siwcRemoteCompactionMu       sync.Mutex
 	siwcRemoteCompactionCache    atomic.Pointer[cachedSIWCRemoteCompaction]
 	siwcConfigurationUpdateMu    sync.Mutex

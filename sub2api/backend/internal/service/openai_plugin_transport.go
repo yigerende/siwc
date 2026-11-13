@@ -12,6 +12,15 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // doOpenAIUpstream 只在 OpenAI OAuth 能力绑定已启用时把真实请求交给插件。
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
+	if account.IsOpenAISIWC() && request.Context().Value(siwcToolSearchRetryKey{}) != nil {
+		return s.doSIWCToolSearchRetry(request, account, func(next *http.Request) (*http.Response, error) {
+			return s.doOpenAIUpstreamOnce(next, proxyURL, account)
+		})
+	}
+	return s.doOpenAIUpstreamOnce(request, proxyURL, account)
+}
+
+func (s *OpenAIGatewayService) doOpenAIUpstreamOnce(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
 	if account.IsOpenAISIWC() && siwcRemoteCompactionAllowed(request.Context()) {
 		return s.doSIWCRemoteCompaction(request, proxyURL, account)
 	}

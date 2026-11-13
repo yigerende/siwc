@@ -499,6 +499,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 	}
 
+	// A websocket response.create gets its own budget; no messages for this
+	// turn have been written while the HTTP transport handles a rejection.
+	if account.IsOpenAISIWC() {
+		ctx = bindSIWCToolSearchWSTurn(ctx, c, turn)
+	}
 	buildUpstreamRequest := func(requestBody []byte) (*http.Request, error) {
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		defer releaseUpstreamCtx()
