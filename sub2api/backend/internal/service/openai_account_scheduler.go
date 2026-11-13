@@ -90,8 +90,9 @@ type OpenAIAccountScheduleRequest struct {
 	RequiredImageCapability OpenAIImagesCapability
 	// RequireCompact is only for legacy /responses/compact capability filtering
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
-	RequireCompact bool
-	ExcludedIDs    map[int64]struct{}
+	RequireCompact            bool
+	AllowSIWCRemoteCompaction bool
+	ExcludedIDs               map[int64]struct{}
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -888,7 +889,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	if req.RequireCompact {
 		candidates = make([]openAIAccountCandidateScore, 0, len(allCandidates))
 		for _, candidate := range allCandidates {
-			if openAICompactSupportTier(candidate.account) == 0 {
+			if openAICompactSupportTier(candidate.account, req.AllowSIWCRemoteCompaction) == 0 {
 				staleSnapshotCompactRetry = append(staleSnapshotCompactRetry, candidate)
 				continue
 			}
@@ -1109,7 +1110,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		supported := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
 		unknown := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
 		for _, candidate := range plan.candidates {
-			switch openAICompactSupportTier(candidate.account) {
+			switch openAICompactSupportTier(candidate.account, req.AllowSIWCRemoteCompaction) {
 			case 2:
 				supported = append(supported, candidate)
 			case 1:
@@ -1215,7 +1216,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			release(result)
 			continue
 		}
-		if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
+		if req.RequireCompact && openAICompactSupportTier(fresh, req.AllowSIWCRemoteCompaction) == 0 {
 			compactBlocked = true
 			release(result)
 			continue
@@ -1305,7 +1306,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		if !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 			continue
 		}
-		if req.RequireCompact && openAICompactSupportTier(account) == 0 {
+		if req.RequireCompact && openAICompactSupportTier(account, req.AllowSIWCRemoteCompaction) == 0 {
 			continue
 		}
 		// Keep weighted sticky fallback subject to the same free-tier gate as the
@@ -1641,7 +1642,7 @@ func openAICostOverflowExpanded(req OpenAIAccountScheduleRequest, plan openAIAcc
 	}
 	supported, unknown := 0, 0
 	for _, candidate := range plan.candidates {
-		switch openAICompactSupportTier(candidate.account) {
+		switch openAICompactSupportTier(candidate.account, req.AllowSIWCRemoteCompaction) {
 		case 2:
 			supported++
 		case 1:
@@ -1718,7 +1719,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 				continue
 			}
-			if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
+			if req.RequireCompact && openAICompactSupportTier(fresh, req.AllowSIWCRemoteCompaction) == 0 {
 				compactBlocked = true
 				continue
 			}
@@ -2273,15 +2274,16 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 	account := selection.Account
 	scheduler := &defaultOpenAIAccountScheduler{service: s, stats: newOpenAIAccountRuntimeStats()}
 	compatible, _ := scheduler.isAccountRequestCompatibleReason(ctx, account, OpenAIAccountScheduleRequest{
-		GroupID:                 groupID,
-		Platform:                platform,
-		RequestedModel:          requestedModel,
-		RequiredTransport:       requiredTransport,
-		RequiredCapability:      requiredCapability,
-		RequiredImageCapability: requiredImageCapability,
-		RequireCompact:          requireCompact,
-		ExcludedIDs:             excludedIDs,
-		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
+		AllowSIWCRemoteCompaction: siwcRemoteCompactionAllowed(ctx),
+		GroupID:                   groupID,
+		Platform:                  platform,
+		RequestedModel:            requestedModel,
+		RequiredTransport:         requiredTransport,
+		RequiredCapability:        requiredCapability,
+		RequiredImageCapability:   requiredImageCapability,
+		RequireCompact:            requireCompact,
+		ExcludedIDs:               excludedIDs,
+		RequirePrivacySet:         s.openAIGroupRequiresPrivacySet(ctx, groupID),
 	})
 	if !s.openAIAccountMatchesSchedulingGroup(account, groupID) || !compatible || !scheduler.isAccountTransportCompatible(account, requiredTransport) {
 		if selection.ReleaseFunc != nil {
@@ -2346,18 +2348,19 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 			}
 			fallbackScheduler := &defaultOpenAIAccountScheduler{service: s, stats: newOpenAIAccountRuntimeStats()}
 			selection, _, err := fallbackScheduler.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{
-				GroupID:                 groupID,
-				Platform:                platform,
-				SessionHash:             sessionHash,
-				StickyAccountID:         guardianParentAccountID,
-				PreserveStickyBinding:   true,
-				RequestedModel:          requestedModel,
-				RequiredTransport:       requiredTransport,
-				RequiredCapability:      requiredCapability,
-				RequiredImageCapability: requiredImageCapability,
-				RequireCompact:          requireCompact,
-				ExcludedIDs:             excludedIDs,
-				RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
+				AllowSIWCRemoteCompaction: siwcRemoteCompactionAllowed(ctx),
+				GroupID:                   groupID,
+				Platform:                  platform,
+				SessionHash:               sessionHash,
+				StickyAccountID:           guardianParentAccountID,
+				PreserveStickyBinding:     true,
+				RequestedModel:            requestedModel,
+				RequiredTransport:         requiredTransport,
+				RequiredCapability:        requiredCapability,
+				RequiredImageCapability:   requiredImageCapability,
+				RequireCompact:            requireCompact,
+				ExcludedIDs:               excludedIDs,
+				RequirePrivacySet:         s.openAIGroupRequiresPrivacySet(ctx, groupID),
 			})
 			if err != nil {
 				return nil, decision, err
@@ -2449,25 +2452,26 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 
 	return scheduler.Select(ctx, OpenAIAccountScheduleRequest{
-		GroupID:                 groupID,
-		Platform:                platform,
-		SessionHash:             sessionHash,
-		StickyAccountID:         stickyAccountID,
-		GuardianParentAccountID: guardianParentAccountID,
-		StickyPreviousAccountID: stickyPreviousAccountID,
-		StickyWeighted:          stickyWeighted,
-		SubscriptionPriority:    subscriptionPriority,
-		PreserveStickyBinding:   preserveGuardianParentBinding,
-		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
-		PreviousResponseID:      previousResponseID,
-		PreviousResponseCanMove: previousResponseCanMove,
-		UseUpstreamTokenCost:    useUpstreamTokenCost,
-		RequestedModel:          requestedModel,
-		RequiredTransport:       requiredTransport,
-		RequiredCapability:      requiredCapability,
-		RequiredImageCapability: requiredImageCapability,
-		RequireCompact:          requireCompact,
-		ExcludedIDs:             excludedIDs,
+		AllowSIWCRemoteCompaction: siwcRemoteCompactionAllowed(ctx),
+		GroupID:                   groupID,
+		Platform:                  platform,
+		SessionHash:               sessionHash,
+		StickyAccountID:           stickyAccountID,
+		GuardianParentAccountID:   guardianParentAccountID,
+		StickyPreviousAccountID:   stickyPreviousAccountID,
+		StickyWeighted:            stickyWeighted,
+		SubscriptionPriority:      subscriptionPriority,
+		PreserveStickyBinding:     preserveGuardianParentBinding,
+		RequirePrivacySet:         s.openAIGroupRequiresPrivacySet(ctx, groupID),
+		PreviousResponseID:        previousResponseID,
+		PreviousResponseCanMove:   previousResponseCanMove,
+		UseUpstreamTokenCost:      useUpstreamTokenCost,
+		RequestedModel:            requestedModel,
+		RequiredTransport:         requiredTransport,
+		RequiredCapability:        requiredCapability,
+		RequiredImageCapability:   requiredImageCapability,
+		RequireCompact:            requireCompact,
+		ExcludedIDs:               excludedIDs,
 	})
 }
 

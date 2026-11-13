@@ -15,6 +15,12 @@ export interface SIWCImport {
   name: string
 }
 export const siwcAPI = {
+  async remoteCompaction(): Promise<{ enabled: boolean }> {
+    return (await apiClient.get('/admin/siwc/remote-compaction')).data
+  },
+  async saveRemoteCompaction(enabled: boolean): Promise<{ enabled: boolean }> {
+    return (await apiClient.put('/admin/siwc/remote-compaction', { enabled })).data
+  },
   async configurationUpdate(): Promise<{ enabled: boolean }> {
     return (await apiClient.get('/admin/siwc/configuration-update')).data
   },

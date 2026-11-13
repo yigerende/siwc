@@ -444,13 +444,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 	legacyCompact := service.IsOpenAIResponsesCompactPath(c)
 	nativeV2 := isBareOpenAIResponsesPath(c) && isOpenAIRemoteCompactionV2Request(body)
-	// SIWC（token-sharing 直连路由）不支持任何形式的远端压缩：compaction_trigger
-	// 项会被上游以 "subscription sharing currently supports only ..." 400 拒绝
-	// （实测 2026-10-17）。把带触发器的原生 v2 压缩请求一并纳入 compact 能力
-	// 调度（SIWC 账号 tier=0 被排除），全 SIWC 池时按既有语义返回
-	// compact_not_supported，客户端 codex 收到错误后自行走本地压缩。
+	// Native triggers require compact eligibility. SIWC is excluded unless
+	// this request snapshots its optional compatibility setting below.
 	compactTriggerInInput := service.HasCompactionTriggerInInput(body)
 	if nativeV2 {
+		// The compatibility snapshot only admits SIWC for this native-v2 request.
+		// Ordinary OAuth keeps its original compact eligibility and wire protocol.
+		c.Request = c.Request.WithContext(h.gatewayService.WithSIWCRemoteCompactionCompatibility(c.Request.Context()))
 		// 原生 v2 压缩出站前补注 x-codex-beta-features: remote_compaction_v2，
 		// 与真实 Codex 线型一致（网关链剥头后本级负责恢复，#5586）。
 		service.MarkOpenAINativeCompactionV2(c)

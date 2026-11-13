@@ -19,6 +19,7 @@
             <template #after>
               <SIWCQualitySettings/>
               <SIWCConfigurationUpdateSwitch />
+              <SIWCRemoteCompactionSwitch />
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -529,6 +530,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import SIWCQualityCell from '@/components/account/SIWCQualityCell.vue'
 import SIWCQualitySettings from '@/components/account/SIWCQualitySettings.vue'
 import SIWCConfigurationUpdateSwitch from '@/components/account/SIWCConfigurationUpdateSwitch.vue'
+import SIWCRemoteCompactionSwitch from '@/components/account/SIWCRemoteCompactionSwitch.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountRecentRequestsCell from '@/components/account/AccountRecentRequestsCell.vue'

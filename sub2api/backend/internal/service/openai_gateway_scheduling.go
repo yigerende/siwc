@@ -334,7 +334,7 @@ func (e openAINoAvailableSelectionError) Unwrap() error {
 
 // openAICompactSupportTier classifies an OpenAI-compatible account by compact capability.
 // 0 = explicitly unsupported, 1 = unknown / not yet probed, 2 = explicitly supported.
-func openAICompactSupportTier(account *Account) int {
+func openAICompactSupportTier(account *Account, allowSIWC ...bool) int {
 	if account == nil {
 		return 0
 	}
@@ -344,12 +344,12 @@ func openAICompactSupportTier(account *Account) int {
 	if !account.IsOpenAI() {
 		return 0
 	}
-	// SIWC（token-sharing 直连路由）凭据只授权 POST /v1/responses：remote
-	// compact（/responses/compact）不在授权操作内，发出去必然 401
-	// "ChatPass credential is not authorized" 并污染账号状态。SIWC 的上下文
-	// 压缩由客户端本地完成，调度层直接把 SIWC 账号归为 compact 不支持，
-	// 池内无其他可用账号时按既有逻辑返回 compact_not_supported。
+	// Only the optional native-trigger adapter admits SIWC. Ordinary OAuth
+	// continues through exactly the existing support-known logic below.
 	if account.IsOpenAISIWC() {
+		if len(allowSIWC) > 0 && allowSIWC[0] && account.GetOpenAICompactMode() != OpenAICompactModeForceOff {
+			return 1
+		}
 		return 0
 	}
 	supported, known := account.OpenAICompactSupportKnown()
@@ -458,7 +458,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 		}
 		return "capability_mismatch"
 	}
-	if requireCompact && openAICompactSupportTier(account) == 0 {
+	if requireCompact && openAICompactSupportTier(account, siwcRemoteCompactionAllowed(ctx)) == 0 {
 		return "compact_unsupported"
 	}
 	return ""
@@ -794,7 +794,7 @@ func (s *OpenAIGatewayService) withOpenAIQuotaAutoPauseContext(ctx context.Conte
 // prioritizeOpenAICompactAccounts re-orders a slice so that accounts with known
 // compact support are tried first, followed by unknown, then explicitly unsupported.
 // The relative order within each tier is preserved.
-func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
+func prioritizeOpenAICompactAccounts(accounts []*Account, allowSIWC ...bool) []*Account {
 	if len(accounts) == 0 {
 		return nil
 	}
@@ -802,7 +802,7 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 	unknown := make([]*Account, 0, len(accounts))
 	unsupported := make([]*Account, 0, len(accounts))
 	for _, account := range accounts {
-		switch openAICompactSupportTier(account) {
+		switch openAICompactSupportTier(account, allowSIWC...) {
 		case 2:
 			supported = append(supported, account)
 		case 1:
@@ -1068,7 +1068,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		}
 		compactTier := 0
 		if requireCompact {
-			compactTier = openAICompactSupportTier(fresh)
+			compactTier = openAICompactSupportTier(fresh, siwcRemoteCompactionAllowed(ctx))
 			if compactTier == 0 {
 				compactBlocked = true
 				filterStats.exclude("compact_unsupported")
@@ -1375,7 +1375,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if requireCompact {
 			appendTier := func(out []accountWithLoad, tier int) []accountWithLoad {
 				for _, item := range available {
-					if openAICompactSupportTier(item.account) == tier {
+					if openAICompactSupportTier(item.account, siwcRemoteCompactionAllowed(ctx)) == tier {
 						out = append(out, item)
 					}
 				}
@@ -1427,7 +1427,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			})
 		}
 		if requireCompact {
-			ordered = prioritizeOpenAICompactAccounts(ordered)
+			ordered = prioritizeOpenAICompactAccounts(ordered, siwcRemoteCompactionAllowed(ctx))
 		}
 		for _, acc := range ordered {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
@@ -1477,7 +1477,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		})
 	}
 	if requireCompact {
-		candidates = prioritizeOpenAICompactAccounts(candidates)
+		candidates = prioritizeOpenAICompactAccounts(candidates, siwcRemoteCompactionAllowed(ctx))
 	}
 	for _, acc := range candidates {
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
