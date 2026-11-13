@@ -98,7 +98,7 @@ func TestSIWCToolSearchRetrySuccessAndSharedBudget(t *testing.T) {
 }
 
 func TestSIWCToolSearchRetryPluginHeaderCasing(t *testing.T) {
-	for _, headerName := range []string{"Content-Type", "content-type", "CONTENT-TYPE"} {
+	for _, headerName := range []string{"Content-Type", "content-type", "CONTENT-TYPE", "application-json", "missing"} {
 		for _, streaming := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/stream=%t", headerName, streaming), func(t *testing.T) {
 				settings := newPanelRateLimitTestService(&panelRateLimitSettingRepo{})
@@ -114,8 +114,14 @@ func TestSIWCToolSearchRetryPluginHeaderCasing(t *testing.T) {
 					}
 					// Plugin RPC preserves HTTP/2 lowercase headers. SIWC also
 					// forces SSE upstream when the client requests non-stream JSON.
+					headers := http.Header{headerName: {"text/event-stream; charset=utf-8"}, "content-length": {"999"}}
+					if headerName == "application-json" {
+						headers = http.Header{"Content-Type": {"application/json"}}
+					} else if headerName == "missing" {
+						headers = http.Header{}
+					}
 					return &http.Response{StatusCode: 200,
-						Header: http.Header{headerName: {"text/event-stream; charset=utf-8"}, "content-length": {"999"}},
+						Header: headers,
 						Body: io.NopCloser(strings.NewReader("event: response.completed\ndata: " +
 							`{"type":"response.completed","sequence_number":0,"response":{"status":"completed","output":[{"type":"function_call","id":"fc_next","call_id":"call_next","name":"tool_search","arguments":"{\"query\":\"next\"}"}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}}` + "\n\n"))}, nil
 				})

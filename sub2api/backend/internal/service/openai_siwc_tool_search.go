@@ -145,8 +145,18 @@ func (s *OpenAIGatewayService) doSIWCToolSearchRetry(request *http.Request, acco
 			headers[name] = append(headers[name], values...)
 		}
 		retried.Header = headers
-		stream := isEventStreamResponse(headers)
-		retried.Body = newSIWCToolSearchBody(retried.Body, stream)
+		// Some transports omit or mislabel Content-Type while returning SSE.
+		// Peek only the framing prefix and replay it unchanged; do not buffer
+		// the response or trust the client's stream flag (SIWC can force SSE).
+		reader := bufio.NewReader(retried.Body)
+		prefix, _ := reader.Peek(6)
+		stream := isEventStreamResponse(headers) || bytes.HasPrefix(prefix, []byte("event:")) ||
+			bytes.HasPrefix(prefix, []byte("data:")) || bytes.HasPrefix(prefix, []byte(":")) ||
+			bytes.HasPrefix(prefix, []byte("id:")) || bytes.HasPrefix(prefix, []byte("retry:"))
+		if stream {
+			headers.Set("Content-Type", "text/event-stream")
+		}
+		retried.Body = newSIWCToolSearchBody(&siwcReplayBody{Reader: reader, Closer: retried.Body}, stream)
 		retried.ContentLength = -1
 		slog.InfoContext(request.Context(), "siwc_tool_search_compat_retry_accepted", "account_id", account.ID)
 	}
