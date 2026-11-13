@@ -398,8 +398,11 @@ func ProvideUsageCleanupService(repo UsageCleanupRepository, timingWheel *Timing
 }
 
 // ProvideAccountExpiryService creates and starts AccountExpiryService.
-func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpiryService {
+func ProvideAccountExpiryService(accountRepo AccountRepository, settings *SettingService) *AccountExpiryService {
 	svc := NewAccountExpiryService(accountRepo, time.Minute)
+	if repo, ok := accountRepo.(SpaceWorkflowCleanupRepository); ok {
+		svc.spaceCleanup = &SpaceWorkflowCleanup{settings: settings, repo: repo}
+	}
 	svc.Start()
 	return svc
 }

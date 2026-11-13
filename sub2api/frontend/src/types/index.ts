@@ -1227,6 +1227,17 @@ export interface OpenCodeGoUsageSettings {
 }
 
 export interface Account {
+  space_workflow?: {
+    source_id: string
+    revision: number
+    email: string
+    flow_id: string
+    order_id?: string
+    stage: 'merge' | 'merge_v2' | 'deactivate' | 'merchant'
+    completed: boolean
+    manual: boolean
+    changed_at: string
+  }
   id: number
   name: string
   notes?: string | null

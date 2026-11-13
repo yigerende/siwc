@@ -23,6 +23,7 @@ import (
 )
 
 type Account struct {
+	SpaceWorkflow           *SpaceWorkflow `json:"space_workflow,omitempty"`
 	ID                      int64
 	Name                    string
 	Notes                   *string

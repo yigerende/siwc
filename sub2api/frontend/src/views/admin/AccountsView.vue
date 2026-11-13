@@ -20,6 +20,7 @@
               <SIWCQualitySettings/>
               <SIWCConfigurationUpdateSwitch />
               <SIWCRemoteCompactionSwitch />
+              <SpaceWorkflowCleanup />
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -245,6 +246,7 @@
                 </template>
               </HelpTooltip>
               <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <SpaceWorkflowBadge :marker="row.space_workflow" />
               <span
                 v-if="accountDisplayEmail(row)"
                 class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
@@ -526,6 +528,8 @@ import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
+import SpaceWorkflowBadge from '@/components/account/SpaceWorkflowBadge.vue'
+import SpaceWorkflowCleanup from '@/components/account/SpaceWorkflowCleanup.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import SIWCQualityCell from '@/components/account/SIWCQualityCell.vue'
 import SIWCQualitySettings from '@/components/account/SIWCQualitySettings.vue'

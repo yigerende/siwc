@@ -9,11 +9,12 @@ import (
 
 // AccountExpiryService periodically pauses expired accounts when auto-pause is enabled.
 type AccountExpiryService struct {
-	accountRepo AccountRepository
-	interval    time.Duration
-	stopCh      chan struct{}
-	stopOnce    sync.Once
-	wg          sync.WaitGroup
+	accountRepo  AccountRepository
+	spaceCleanup *SpaceWorkflowCleanup
+	interval     time.Duration
+	stopCh       chan struct{}
+	stopOnce     sync.Once
+	wg           sync.WaitGroup
 }
 
 func NewAccountExpiryService(accountRepo AccountRepository, interval time.Duration) *AccountExpiryService {
@@ -57,6 +58,8 @@ func (s *AccountExpiryService) Stop() {
 }
 
 func (s *AccountExpiryService) runOnce() {
+	// Reuse the existing minute timer and shutdown lifecycle; no request path work.
+	defer s.spaceCleanup.RunDue()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

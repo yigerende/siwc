@@ -32,6 +32,9 @@ func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int,
 	if err != nil {
 		return nil, 0, err
 	}
+	if err := s.loadSpaceWorkflows(ctx, accounts); err != nil {
+		return nil, 0, err
+	}
 	return accounts, result.Total, nil
 }
 
@@ -53,7 +56,15 @@ func (s *adminServiceImpl) ListOpenAISchedulableAccountsForSchedulerScore(ctx co
 }
 
 func (s *adminServiceImpl) GetAccount(ctx context.Context, id int64) (*Account, error) {
-	return s.accountRepo.GetByID(ctx, id)
+	a, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	items := []Account{*a}
+	if err = s.loadSpaceWorkflows(ctx, items); err != nil {
+		return nil, err
+	}
+	return &items[0], nil
 }
 
 func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([]*Account, error) {
