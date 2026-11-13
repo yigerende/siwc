@@ -15,6 +15,12 @@ export interface SIWCImport {
   name: string
 }
 export const siwcAPI = {
+  async configurationUpdate(): Promise<{ enabled: boolean }> {
+    return (await apiClient.get('/admin/siwc/configuration-update')).data
+  },
+  async saveConfigurationUpdate(enabled: boolean): Promise<{ enabled: boolean }> {
+    return (await apiClient.put('/admin/siwc/configuration-update', { enabled })).data
+  },
   async connect(url: string, email: string, password: string): Promise<SIWCTarget> {
     return (await apiClient.post(`${root}/remote/connect`, { url, email, password }, { timeout: 100000 })).data
   },
