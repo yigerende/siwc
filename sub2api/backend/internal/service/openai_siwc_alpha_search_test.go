@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -127,6 +128,25 @@ func TestSIWCAlphaSearchCompletionAndFailures(t *testing.T) {
 				require.NotContains(t, string(e.payload), "not logged")
 			}
 		})
+	}
+}
+
+func TestSIWCAlphaSearchThinCompletion(t *testing.T) {
+	complete := gjson.Parse(openAIAlphaSearchSSEData(strings.Split(siwcAlphaFixture("actual answer"), "\n\n")[0]))
+	var events strings.Builder
+	for i, item := range complete.Get("response.output").Array() {
+		fmt.Fprintf(&events, "data: {\"type\":\"response.output_item.done\",\"output_index\":%d,\"item\":%s}\n\n", i, item.Raw)
+	}
+	// Done items alone still cannot authorize success or billing.
+	_, err := siwcAlphaSearchResponse([]byte(events.String()))
+	require.Error(t, err)
+	for _, output := range []string{"[]", `[ {"type":"message","content":[{"type":"output_text","text":"incomplete final snapshot"}]} ]`} {
+		wire := events.String() + `data: {"type":"response.completed","response":{"status":"completed","output":` + output + `}}` + "\n\n"
+		out, err := siwcAlphaSearchResponse([]byte(wire))
+		require.NoError(t, err)
+		require.Contains(t, gjson.GetBytes(out, "output").String(), "actual answer")
+		require.NotContains(t, gjson.GetBytes(out, "output").String(), "Searching...")
+		require.Equal(t, "https://go.dev/dl/", gjson.GetBytes(out, "results.0.ref_id").String())
 	}
 }
 

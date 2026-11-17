@@ -76,12 +76,19 @@ func siwcAlphaSearchTerminalFailure(kind string, event gjson.Result) error {
 // A 200, text delta or [DONE] is never sufficient for a billable success.
 func siwcAlphaSearchResponse(body []byte) ([]byte, error) {
 	var completed gjson.Result
+	doneItems := newResponsesStreamOutputItems()
 	accept := func(event gjson.Result) error {
+		doneItems.Observe([]byte(event.Raw))
 		switch kind := event.Get("type").String(); kind {
 		case "error", "response.failed", "response.incomplete":
 			return siwcAlphaSearchTerminalFailure(kind, event)
 		case "response.completed":
-			completed = event.Get("response")
+			// The direct route may put its final output only in item.done
+			// events and leave the terminal output empty. Use the same raw
+			// item reconstruction as ordinary Responses, retaining tool calls,
+			// citations and message phases before checking search success.
+			normalized, _ := normalizeResponsesStreamingTerminalOutput([]byte(event.Raw), nil, doneItems, nil)
+			completed = gjson.GetBytes(normalized, "response")
 		}
 		return nil
 	}
