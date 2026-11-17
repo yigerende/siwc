@@ -70,6 +70,11 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if account.IsOpenAIPersonalAccessToken() {
 		return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, body, token, proxyURL, requestedModel, upstreamModel)
 	}
+	if account.IsOpenAISIWC() && s.settingService != nil {
+		if enabled, _ := s.settingService.GetSIWCAlphaSearchCompatibility(ctx); enabled {
+			return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, body, token, proxyURL, requestedModel, upstreamModel)
+		}
+	}
 
 	req, err := s.buildOpenAIAlphaSearchRequest(ctx, c, account, body, token)
 	if err != nil {
@@ -150,7 +155,11 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	if upstreamModel == "" {
 		upstreamModel = requestedModel
 	}
-	responsesBody, err := buildOpenAIAlphaSearchResponsesWebSearchBody(alphaBody, upstreamModel)
+	buildBody := buildOpenAIAlphaSearchResponsesWebSearchBody
+	if account.IsOpenAISIWC() {
+		buildBody = buildSIWCAlphaSearchBody
+	}
+	responsesBody, err := buildBody(alphaBody, upstreamModel)
 	if err != nil {
 		return nil, err
 	}
@@ -206,8 +215,20 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	if !account.IsShadow() {
 		s.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, resp.Header)
 	}
-	alphaRespBody, err := openAIAlphaSearchResponseFromResponsesSSE(respBody)
+	parseResponse := openAIAlphaSearchResponseFromResponsesSSE
+	if account.IsOpenAISIWC() {
+		parseResponse = siwcAlphaSearchResponse
+	}
+	alphaRespBody, err := parseResponse(respBody)
 	if err != nil {
+		if account.IsOpenAISIWC() {
+			if failure, ok := err.(*siwcAlphaSearchFailure); ok {
+				if failover := s.nonStreamingTerminalFailureFailover(c, resp, account, false, failure.kind, failure.payload, failure.Error(), openAIAlphaSearchSchedulingModel(account, requestedModel)); failover != nil {
+					return nil, failover
+				}
+				s.recordOpenAIStreamUpstreamError(c, account, false, resp.Header.Get("x-request-id"), "stream_failed", failure.payload, failure.Error())
+			}
+		}
 		return nil, err
 	}
 	c.Data(http.StatusOK, "application/json", alphaRespBody)

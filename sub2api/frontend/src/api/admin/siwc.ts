@@ -15,6 +15,12 @@ export interface SIWCImport {
   name: string
 }
 export const siwcAPI = {
+  async alphaSearch(): Promise<{ enabled: boolean }> {
+    return (await apiClient.get('/admin/siwc/alpha-search')).data
+  },
+  async saveAlphaSearch(enabled: boolean): Promise<{ enabled: boolean }> {
+    return (await apiClient.put('/admin/siwc/alpha-search', { enabled })).data
+  },
   async toolSearch(): Promise<{ enabled: boolean }> {
     return (await apiClient.get('/admin/siwc/tool-search')).data
   },
