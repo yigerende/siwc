@@ -31,7 +31,7 @@ func TestClaudeResetRedeemRouteMatchesCodexResetProtection(t *testing.T) {
 	})
 	auditLog := servermiddleware.AuditLogMiddleware(func(c *gin.Context) { c.Next() })
 	stepUp := servermiddleware.StepUpAuthMiddleware(func(c *gin.Context) { c.Next() })
-	RegisterAdminRoutes(router.Group("/api/v1"), handlers, adminAuth, auditLog, stepUp, nil, nil)
+	registerAdminRoutesForTest(router.Group("/api/v1"), handlers, adminAuth, auditLog, stepUp, nil, nil)
 
 	codex := "/api/v1/admin/openai/accounts/1/reset-quota"
 	claude := "/api/v1/admin/accounts/1/claude/reset-credits/redeem"
