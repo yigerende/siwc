@@ -28,7 +28,7 @@ RUN go mod download
 COPY backend/ ./
 # 前端产物放进 embed 目录（//go:embed all:dist）
 COPY --from=frontend /src/backend/internal/web/dist ./internal/web/dist
-ARG VERSION=0.2.22
+ARG VERSION=0.2.23
 RUN CGO_ENABLED=0 go build -p 2 -tags=embed -trimpath \
     -ldflags="-s -w -X main.Version=${VERSION}" \
     -o /out/sub2api ./cmd/server
