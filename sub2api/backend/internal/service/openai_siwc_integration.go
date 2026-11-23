@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
+	"log"
+	"net"
 	"net/url"
 	"strings"
 	"sync"
@@ -92,6 +95,9 @@ func (s *OpenAIOAuthService) ImportSIWCIntegration(ctx context.Context, owner, s
 	entry.outcome = infraerrors.Conflict("SIWC_CALLBACK_UNCONFIRMED", "callback result unconfirmed; do not submit another import")
 	tokens, err := s.ExchangeSIWCCode(ctx, &SIWCExchangeInput{SessionID: sessionID, Code: query.Get("code"), State: query.Get("state"), IssuedClientID: query.Get("client_id")})
 	if err != nil {
+		// No account creation was attempted. The one-use code stays consumed;
+		// the caller may start a NEW authorization, never resend this code.
+		entry.outcome = siwcIntegrationFailure("exchange", err, true)
 		return 0, entry.outcome
 	}
 	if !strings.EqualFold(strings.TrimSpace(tokens.Email), entry.email) || tokens.AccessToken == "" || tokens.RefreshToken == "" || tokens.IDToken == "" || tokens.ExpiresAt <= time.Now().Unix() || !tokens.PlanUseEnabled {
@@ -100,8 +106,43 @@ func (s *OpenAIOAuthService) ImportSIWCIntegration(ctx context.Context, owner, s
 	}
 	id, err := create(tokens)
 	if err != nil {
+		// A database reply can be lost after commit. Do not authorize a new
+		// import when account creation may already have had effects.
+		entry.outcome = siwcIntegrationFailure("create_account", err, false)
 		return 0, entry.outcome
 	}
 	entry.accountID, entry.outcome = id, nil
 	return id, nil
+}
+
+func siwcIntegrationFailure(stage string, cause error, reauthorize bool) error {
+	category := "upstream_error"
+	var network net.Error
+	switch {
+	case errors.Is(cause, context.DeadlineExceeded):
+		category = "timeout"
+	case errors.Is(cause, context.Canceled):
+		category = "canceled"
+	case errors.As(cause, &network):
+		category = "network_error"
+	default:
+		switch infraerrors.Reason(cause) {
+		case "OPENAI_SIWC_ID_TOKEN_INVALID", "OPENAI_SIWC_ID_TOKEN_MISSING":
+			category = "id_token_validation"
+		case "OPENAI_SIWC_SESSION_NOT_FOUND", "OPENAI_SIWC_SESSION_FLOW_MISMATCH":
+			category = "session_expired"
+		}
+	}
+	if stage == "create_account" {
+		category = "account_create_unconfirmed"
+	}
+	allowed := "false"
+	if reauthorize {
+		allowed = "true"
+	}
+	// Log only controlled categories, never callbacks, tokens or proxy URLs.
+	log.Printf("[SIWC integration] stage=%s category=%s reauthorize_allowed=%s", stage, category, allowed)
+	return infraerrors.Conflict("SIWC_CALLBACK_UNCONFIRMED", "SIWC callback failed; inspect recovery metadata").WithMetadata(map[string]string{
+		"failure_stage": stage, "failure_category": category, "reauthorize_allowed": allowed,
+	})
 }

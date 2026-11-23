@@ -18,3 +18,9 @@ JSON：email（必填）、ext_agent_host_id（Space 稳定宿主标识，必填
 网页AT只供原网页额度查询，和SIWC凭据独立保存。Space收到结果后完成第三步授权及第四步推送，不再通用建号。代理分配、累计次数与定时解绑仍由Space原规则管理。
 
 同key不同请求返回409。幂等成功记录只存账号ID，重试读取原账号当前凭据，不重复交换或建号，默认保留24小时。结果未知时保留原请求，不把未知当失败重建。会话或进程在交换/建号期间失效需要先核对。普通OAuth、SIWC原页面与续期不改。
+
+### 已确认未建号的409恢复
+
+`SIWC_CALLBACK_UNCONFIRMED` 在换凭证/校验失败且尚未调用账号创建时，携带字符串 metadata：`failure_stage=exchange`、`reauthorize_allowed=true`、`failure_category`。调用方可清除本次失败pending并生成全新的授权链接，不能再次交换旧code。推荐每次执行最多自动恢复一次。
+
+创建账号时失败返回 `failure_stage=create_account`、`reauthorize_allowed=false`；数据库响应可能在提交后丢失，需要继续核对原导入。其他409（正在处理、幂等冲突）或没有上述metadata的旧响应也不允许直接重建。成功幂等回复仍返回原账号和当前凭据。

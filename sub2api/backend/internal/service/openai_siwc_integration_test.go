@@ -4,13 +4,35 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSIWCIntegrationExchangeFailureAllowsOnlyNewAuthorization(t *testing.T) {
+	svc, client, id, callback := integrationFixture(t)
+	client.exchangeErr = context.DeadlineExceeded
+	for range 2 {
+		_, err := svc.ImportSIWCIntegration(context.Background(), "admin:1", id, callback, "same", func(*OpenAITokenInfo) (int64, error) { t.Fatal("create called after failed exchange"); return 0, nil })
+		app := infraerrors.FromError(err)
+		require.Equal(t, "SIWC_CALLBACK_UNCONFIRMED", app.Reason)
+		require.Equal(t, "true", app.Metadata["reauthorize_allowed"])
+		require.Equal(t, "exchange", app.Metadata["failure_stage"])
+		require.Equal(t, "timeout", app.Metadata["failure_category"])
+	}
+	require.Equal(t, 1, client.exchangeCalls)
+}
+
+func TestSIWCIntegrationFailureMetadataDoesNotLeakSecrets(t *testing.T) {
+	err := siwcIntegrationFailure("exchange", errors.New("code=private-code access_token=private-token proxy=http://user:password@host"), true)
+	require.NotContains(t, err.Error(), "private")
+	require.False(t, strings.Contains(err.Error(), "password"))
+}
 
 func integrationFixture(t *testing.T) (*OpenAIOAuthService, *siwcFlowTestClient, string, string) {
 	t.Helper()
@@ -71,6 +93,7 @@ func TestSIWCIntegrationFailedImportDoesNotExchangeOrCreateAgain(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		_, err := svc.ImportSIWCIntegration(context.Background(), "admin:1", id, callback, "same", create)
 		require.Error(t, err)
+		require.Equal(t, "false", infraerrors.FromError(err).Metadata["reauthorize_allowed"])
 	}
 	require.Equal(t, 1, creates)
 	require.Equal(t, 1, client.exchangeCalls)
